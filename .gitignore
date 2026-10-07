@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+backend/.venv/
+backend/data/
+backend/inventory.json
+**/__pycache__/
+node_modules/
+dist/
+*.log
+*.sqlite3
+.local/
+work/

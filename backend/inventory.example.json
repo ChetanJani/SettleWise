@@ -1,0 +1,22 @@
+[
+  {
+    "id": "owner-your-unique-listing-id",
+    "name": "Replace with an actual provider listing",
+    "type": "flat",
+    "area": "Navrangpura",
+    "city": "Ahmedabad",
+    "address": "Enter the actual address",
+    "price": 18000,
+    "price_unit": "month",
+    "deposit": 36000,
+    "maintenance": 1500,
+    "bedrooms": 2,
+    "occupancy": 4,
+    "gender_restriction": "any",
+    "amenities": ["kitchen", "parking"],
+    "description": "Replace all example values with confirmed listing information.",
+    "coordinates": null,
+    "images": [],
+    "source_url": null
+  }
+]
