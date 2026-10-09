@@ -1,4 +1,5 @@
 from copy import deepcopy
+from .evidence import evidence
 
 WEIGHTS={'balanced':{'cost':35,'commute':30,'space':20,'security':15},'cost':{'cost':60,'commute':20,'space':10,'security':10},'commute':{'cost':20,'commute':60,'space':10,'security':10},'space':{'cost':20,'commute':20,'space':50,'security':10},'security':{'cost':20,'commute':20,'space':10,'security':50}}
 
@@ -9,25 +10,33 @@ def rank(properties,prefs):
     personalised=bool(prefs.budget or prefs.destination or prefs.amenities or prefs.bedrooms is not None or prefs.priority!='balanced' or prefs.occupants>1 or prefs.gender_requirement!='any')
     for raw in properties:
         p=deepcopy(raw);reasons=[];tradeoffs=[];missing=[];hard_failure=False
+        p['safety_evidence']=evidence(p)
+        if prefs.property_types and p['type'] not in prefs.property_types and p['type']!='other':excluded+=1;continue
+        if prefs.photos_only and not p.get('images'):excluded+=1;continue
+        if prefs.radius_km and (p.get('area_distance_km') is None or p['area_distance_km']>prefs.radius_km):excluded+=1;continue
         if prefs.property_type!='any' and p['type'] not in (prefs.property_type,'other'):excluded+=1;continue
         if prefs.property_type!='any' and p['type']=='other':missing.append('Accommodation type needs confirmation.')
         price=p.get('price')
-        if prefs.budget:
+        budget=prefs.hotel_budget if p.get('price_unit')=='night' else prefs.budget
+        if budget:
             if price is None:missing.append('Price needs confirmation before budget fit can be assessed.')
-            elif price>prefs.budget:
+            elif price>budget:
                 if prefs.strict_budget:excluded+=1;continue
-                tradeoffs.append(f'₹{price-prefs.budget:,} above your budget per {p["price_unit"]}.')
+                tradeoffs.append(f'₹{price-budget:,} above your budget per {p["price_unit"]}.')
             else:reasons.append('Within your budget')
         if prefs.occupants>1:
             capacity=p.get('occupancy')
             if capacity is None:missing.append('Capacity for your household needs confirmation.')
             elif capacity<prefs.occupants:excluded+=1;continue
             else:reasons.append(f'Space for {prefs.occupants} people')
-        if prefs.gender_requirement!='any':
+        if prefs.gender_requirement!='any' and p['type'] in ('pg','hostel'):
             restriction=p.get('gender_restriction')
-            if restriction is None:missing.append('Accommodation eligibility needs confirmation.')
+            if prefs.gender_requirement=='unknown':
+                if restriction is not None:excluded+=1;continue
+            elif restriction is None:missing.append('Accommodation eligibility needs confirmation.')
+            elif prefs.gender_requirement=='both' and restriction!='any':excluded+=1;continue
             elif restriction not in ('any',prefs.gender_requirement):excluded+=1;continue
-        if prefs.bedrooms is not None:
+        if prefs.bedrooms is not None and p['type'] in ('flat','house'):
             if p.get('bedrooms') is None:missing.append('Bedroom count needs confirmation.')
             elif p['bedrooms']<prefs.bedrooms:excluded+=1;continue
         for amenity in prefs.amenities:
@@ -59,9 +68,12 @@ def rank(properties,prefs):
         if price is not None and p['price_unit']=='month':
             maintenance=p.get('maintenance');p['monthly_cost']={'rent':price,'maintenance':maintenance,'total_known':price+(maintenance or 0),'complete':False,'note':'Known housing cost only. Food, utilities and commute are additional unless explicitly included.'}
             p['initial_housing_cash']=price+(p.get('deposit') or 0)+(maintenance or 0) if p.get('deposit') is not None else None
+        if missing and prefs.known_only:excluded+=1;continue
         if missing:unknown.append(p)
         else:output.append(p)
-    if prefs.sort=='price':output.sort(key=lambda p:(p.get('price') is None,p.get('price') or 0,p['id']))
+    if prefs.sort=='safety':output.sort(key=lambda p:(p['safety_evidence']['score'] is None,-(p['safety_evidence']['score'] or 0),p['id']))
+    elif prefs.sort=='distance':output.sort(key=lambda p:(p.get('area_distance_km') is None,p.get('area_distance_km') or 0,p['id']))
+    elif prefs.sort=='price':output.sort(key=lambda p:(p.get('price') is None,p.get('price_unit','month'),p.get('price') or 0,p['id']))
     elif prefs.sort=='rating':output.sort(key=lambda p:(p.get('rating') is None,-(p.get('rating') or 0),p['id']))
     elif prefs.sort=='commute':output.sort(key=lambda p:((p.get('commute') or {}).get('morning',{}).get('minutes') is None,(p.get('commute') or {}).get('morning',{}).get('minutes') or 0,p['id']))
     else:output.sort(key=lambda p:(p.get('alternative',False),p.get('match_score') is None,-(p.get('match_score') or 0),p.get('area_distance_km',0),p['id']))

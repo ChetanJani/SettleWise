@@ -6,7 +6,9 @@ import hashlib
 import json
 import logging
 import math
+import re
 import time
+from .cache import SearchCache
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 import httpx
 
@@ -74,31 +76,44 @@ def base_property(row,area,city,kind='maps'):
         'place_id':row.get('place_id'),'data_id':row.get('data_id'),'property_token':row.get('property_token'),
         'description':row.get('description') or 'A map-listed place. Confirm the available accommodation, price and terms with the provider.'
     }
+    text=str(title).lower()
+    men=bool(re.search(r'\b(boys|men only|male only|gents)\b',text))
+    women=bool(re.search(r'\b(girls|women only|female only|ladies)\b',text))
+    p['gender_restriction']='any' if men and women else 'men' if men else 'women' if women else None
+    p['gender_source']='Place name — verify eligibility' if men or women else None
+    if p['type']=='hotel':p['price_unit']='night'
     return p
 
 class SerpApi:
-    def __init__(self,key):
+    def __init__(self,key,cache_path=None,daily_limit=30):
         self.key=key;self.cache={};self.locks={};self.sem=asyncio.Semaphore(3)
         self.http=httpx.AsyncClient(timeout=httpx.Timeout(22,connect=8))
         self.request_count=0
+        self.cache_hits=0
+        self.disk=SearchCache(cache_path,daily_limit) if cache_path else None
 
     async def close(self):await self.http.aclose()
 
-    async def search(self,engine,ttl=1800,**params):
+    async def search(self,engine,ttl=86400,**params):
         query={'engine':engine,'hl':'en',**{k:v for k,v in params.items() if v is not None}}
         ck=hashlib.sha256(json.dumps(query,sort_keys=True).encode()).hexdigest()
         cached=self.cache.get(ck)
-        if cached and time.monotonic()-cached[0]<ttl:return deepcopy(cached[1])
+        if cached and time.monotonic()-cached[0]<ttl:self.cache_hits+=1;return deepcopy(cached[1])
         # Per-query locks prevent identical in-flight searches consuming extra credits.
         lock=self.locks.setdefault(ck,asyncio.Lock())
         async with lock:
             cached=self.cache.get(ck)
-            if cached and time.monotonic()-cached[0]<ttl:return deepcopy(cached[1])
+            if cached and time.monotonic()-cached[0]<ttl:self.cache_hits+=1;return deepcopy(cached[1])
+            if self.disk:
+                disk=await asyncio.to_thread(self.disk.get,ck)
+                if disk is not None:
+                    self.cache_hits+=1;self.cache[ck]=(time.monotonic(),deepcopy(disk));return disk
             async with self.sem:
                 if not self.key:raise ProviderError('Live search needs a SerpApi key in backend/.env.')
+                if self.disk and not await asyncio.to_thread(self.disk.reserve):raise ProviderError('Local daily search limit reached. Cached results and filters still work.')
                 try:
-                    response=await self.http.get('https://serpapi.com/search.json',params={**query,'api_key':self.key})
                     self.request_count+=1
+                    response=await self.http.get('https://serpapi.com/search.json',params={**query,'api_key':self.key})
                     if response.status_code in (401,403):raise ProviderError('SerpApi rejected the configured key. Check the local key file.')
                     if response.status_code==429:raise ProviderError('SerpApi search credits or rate limit reached. Check your account.')
                     if response.status_code>=400:raise ProviderError('The search provider could not complete this request.')
@@ -109,6 +124,8 @@ class SerpApi:
                         else:raise ProviderError('No usable response from SerpApi. Check the query and available search credits.')
                 except (httpx.RequestError,ValueError):raise ProviderError('The search provider is unavailable or timed out. Try again.') from None
             payload.pop('search_parameters',None)
+            payload.pop('search_metadata',None)
+            if self.disk:await asyncio.to_thread(self.disk.put,ck,payload,ttl)
             if len(self.cache)>400:
                 oldest=min(self.cache,key=lambda k:self.cache[k][0]);self.cache.pop(oldest,None)
                 if oldest!=ck:self.locks.pop(oldest,None)
@@ -123,69 +140,57 @@ class SerpApi:
             if point:return {**point,'name':row.get('title',text),'address':row.get('address',text),'source_url':maps_link(text+' '+city)}
         return None
 
-    async def autocomplete(self,q,city):
-        async def nearby():
-            if city=='Worldwide':return {}
-            centre=await self.resolve(city)
-            if not centre:return {}
-            return await self.search('google_maps_autocomplete',q=q,ll=f"@{centre['lat']},{centre['lng']},12z")
-        responses=await asyncio.gather(nearby(),self.search('google_maps_autocomplete',q=q,ll='@0,0,3z'),return_exceptions=True)
-        if all(isinstance(p,Exception) for p in responses):raise ProviderError('Location suggestions are temporarily unavailable. You can still type a full area and city.')
-        result=[];seen=set();batches=[]
-        for payload in responses:
-            suggestions=(payload.get('suggestions') or payload.get('suggestion_results') or []) if isinstance(payload,dict) else []
-            batch=[]
-            for s in suggestions[:8]:
-                if isinstance(s,str):s={'value':s}
-                if not isinstance(s,dict):continue
-                value=s.get('value') or s.get('title') or s.get('text') or s.get('name')
-                if not isinstance(value,str) or not value.strip():continue
-                point=coords({'gps_coordinates':{'latitude':s.get('latitude'),'longitude':s.get('longitude')}})
-                address=str(s.get('subtext') or '')[:240]
-                batch.append({'text':value[:160],'address':address,'coordinates':point,'type':s.get('type','place' if point else 'keyword')})
-            batches.append(batch)
-        # Interleave nearby and worldwide results without discarding place context.
-        for i in range(8):
-            for batch in batches:
-                if i>=len(batch):continue
-                s=batch[i];key=(s['text'].casefold(),s['address'].casefold())
-                if key in seen:continue
-                seen.add(key);result.append(s)
-        return result[:12]
+    async def autocomplete(self,q,city='Worldwide'):
+        payload=await self.search('google_maps_autocomplete',q=q,ll='@0,0,3z',ttl=604800)
+        result=[];seen=set()
+        for row in (payload.get('suggestions') or [])[:12]:
+            if isinstance(row,str):row={'value':row}
+            if not isinstance(row,dict):continue
+            name=row.get('value') or row.get('title') or row.get('text')
+            if not isinstance(name,str):continue
+            address=str(row.get('subtext') or '')[:240]
+            key=(name.casefold(),address.casefold())
+            if key in seen:continue
+            seen.add(key)
+            point=coords({'gps_coordinates':{'latitude':row.get('latitude'),'longitude':row.get('longitude')}})
+            result.append({'text':name[:160],'address':address,'coordinates':point,'type':row.get('type','place')})
+        return result
 
     async def discover(self,body):
         centre=body.location.model_dump() if body.location else await self.resolve(body.area,body.city)
-        if not centre:raise ProviderError('We could not locate that area. Add a city or choose a more specific location.')
+        if not centre:raise ProviderError('Choose a more specific place or include its city.')
         context=f'{body.location.name}, {body.location.address}'.strip(', ') if body.location else body.area if body.city=='Worldwide' else f'{body.area}, {body.city}'
-        if body.property_type=='hotel':
-            p=await self.search('google_hotels',q=f'Hotels near {context}',currency='INR',check_in_date=body.check_in.isoformat(),check_out_date=body.check_out.isoformat(),adults=body.occupants,ttl=600)
-            items=[]
-            for row in p.get('properties',[])[:16]:
-                item=base_property(row,body.area,body.city,'hotel')
-                item.update(type='hotel',price=finite((row.get('rate_per_night') or {}).get('extracted_lowest')),price_unit='night',total_stay_price=finite((row.get('total_rate') or {}).get('extracted_lowest')),amenities=[str(a) for a in row.get('amenities',[])],source_kind='hotel_result',source_name='Google Hotels',source_url=safe_url(row.get('link')) or maps_link(row.get('name','')+' '+body.city),stay_dates={'check_in':body.check_in.isoformat(),'check_out':body.check_out.isoformat(),'guests':body.occupants},listing_status='Date-specific search price; confirm final terms with booking provider')
-                item['images']=[{'url':u,'kind':'hotel_photo','caption':'Hotel photo; room category may differ'} for im in row.get('images',[])[:6] if (u:=safe_url(im.get('original_image') or im.get('thumbnail') if isinstance(im,dict) else im))]
-                if row.get('gps_coordinates'):item['coordinates']=coords(row)
-                items.append(item)
-            return centre,items,[]
-        queries={'any':'PG hostels rental accommodation','pg':'paying guest PG accommodation','hostel':'hostels','flat':'residential apartments flats','house':'rental houses bungalows'}
-        payload=await self.search('google_maps',q=f'{queries[body.property_type]} near {context}',type='search',ll=f"@{centre['lat']},{centre['lng']},14z")
-        items=[]
+        types=body.property_types or (['flat','pg','hostel','hotel','house'] if body.property_type=='any' else [body.property_type])
+        terms={'pg':'paying guest PG','hostel':'hostels','hotel':'hotels','flat':'apartments flats','house':'rental houses villas'}
+        # One combined discovery query returns the selected accommodation types.
+        payload=await self.search('google_maps',q=' '.join(terms[t] for t in types)+' near '+context,type='search',ll=f"@{centre['lat']},{centre['lng']},14z")
+        items=[];seen=set()
         for row in rows(payload):
-            item=base_property(row,body.area,body.city)
-            point=item['coordinates']
-            if not point or km(centre,point)>12:continue
-            item['area_distance_km']=km(centre,point)
-            if body.property_type!='any' and item['type'] not in (body.property_type,'other'):continue
-            if item['type']=='hotel':continue
+            item=base_property(row,body.area,body.city);point=item['coordinates']
+            if not point or km(centre,point)>12 or item['id'] in seen:continue
+            if item['type'] not in types and item['type']!='other':continue
+            seen.add(item['id']);item['area_distance_km']=km(centre,point)
             items.append(item)
-        leads=[]
-        if body.property_type in ('any','flat','house'):
-            try:
-                search=await self.search('google',q=f'{body.property_type if body.property_type!="any" else "flats"} for rent {context}',num=6,ttl=3600)
-                for r in search.get('organic_results',[])[:5]:
-                    if u:=safe_url(r.get('link')):leads.append({'title':r.get('title','Listing website'),'url':u,'snippet':r.get('snippet',''),'source':'Google Search','verified':False})
-            except ProviderError:pass
-        return centre,items[:16],leads
+        return centre,items[:40],[]
+
+    async def photos(self,prop,body=None):
+        if not prop.get('data_id'):return {'images':prop.get('images',[])}
+        payload=await self.search('google_maps_photos',data_id=prop['data_id'],ttl=604800)
+        images=[{'url':u,'kind':'place_photo','caption':'Source photo; available room may differ'} for row in payload.get('photos',[])[:10] if isinstance(row,dict) and (u:=safe_url(row.get('image') or row.get('thumbnail')))]
+        return {'images':images or prop.get('images',[])}
+
+    async def reviews_only(self,prop,body=None):
+        if not (prop.get('place_id') or prop.get('data_id')):return {'reviews':[]}
+        params={'place_id':prop['place_id']} if prop.get('place_id') else {'data_id':prop['data_id']}
+        payload=await self.search('google_maps_reviews',**params,sort_by='newestFirst',ttl=86400)
+        return {'reviews':[{'text':str(r.get('snippet') or r.get('text') or '')[:260],'rating':finite(r.get('rating')),'date':r.get('iso_date') or r.get('date'),'url':safe_url(r.get('link')) or prop['source_url']} for r in payload.get('reviews',[])[:10]]}
+
+    async def place_only(self,prop,body=None):
+        if not (prop.get('place_id') or prop.get('data_id')):return {'property_facts':{}}
+        params={'place_id':prop['place_id']} if prop.get('place_id') else {'data_cid':str(int(prop['data_id'].split(':')[-1],16))}
+        payload=await self.search('google_maps',**params,ttl=86400)
+        row=payload.get('place_results') or {}
+        return {'property_facts':{k:row[k] for k in ('address','phone','website','description','hours','extensions') if row.get(k)}}
 
     async def commute(self,prop,body):
         if not body.destination or not prop.get('coordinates'):return None
@@ -247,19 +252,18 @@ class SerpApi:
 
     async def nearby(self,prop,body):
         point=prop.get('coordinates')
-        if not point:return {'places':[],'warnings':['No coordinates available to measure nearby places.']}
-        categories={'grocery':'grocery store','pharmacy':'pharmacy','hospital':'hospital','transit':'bus stop metro public transport','petrol':'petrol pump','school':'school','railway':'railway station','airport':'airport'}
-        found=[];warnings=[]
-        async def category(key,query):
-            try:
-                p=await self.search('google_maps',q=query+' near me',ll=f"@{point['lat']},{point['lng']},14z",nearby=True,type='search',gl='in',ttl=86400)
-                options=[(km(point,c),r) for r in rows(p) if (c:=coords(r))]
-                radius=60 if key=='airport' else 20 if key=='railway' else 8 if key=='hospital' else 3
-                options=[(d,r) for d,r in options if d<=radius]
-                for d,r in sorted(options,key=lambda x:x[0])[:2]:found.append({'category':key,'name':r.get('title',query),'distance_km':d,'distance_kind':'straight_line','rating':finite(r.get('rating')),'url':maps_link(r.get('title',query)+' '+body.city)})
-            except ProviderError:warnings.append(f'{key.capitalize()} lookup is currently unavailable.')
-        await asyncio.gather(*(category(k,q) for k,q in categories.items() if k!='school' or body.household=='family'))
-        return {'places':found,'warnings':warnings,'retrieved_at':stamp()}
+        if not point:return {'places':[],'warnings':['Location unavailable.']}
+        labels={'grocery':('grocery','supermarket'),'pharmacy':('pharmacy','medical shop'),'hospital':('hospital',),'transit':('bus stop','metro station'),'petrol':('petrol','gas station'),'railway':('railway station','train station'),'airport':('airport',)}
+        if body.household=='family':labels['school']=('school',)
+        payload=await self.search('google_maps',q='grocery pharmacy hospital petrol public transport '+('school ' if body.household=='family' else '')+'near '+(prop.get('address') or prop['name']),ll=f"@{point['lat']},{point['lng']},14z",type='search',ttl=86400)
+        found=[]
+        for row in rows(payload):
+            coordinate=coords(row)
+            if not coordinate:continue
+            text=(str(row.get('title',''))+' '+str(row.get('type',''))).lower()
+            category=next((k for k,terms in labels.items() if any(term in text for term in terms)),None)
+            if category and km(point,coordinate)<=8:found.append({'category':category,'name':row.get('title'),'distance_km':km(point,coordinate),'distance_kind':'straight_line','url':maps_link(row.get('title','')+' '+body.city)})
+        return {'places':sorted(found,key=lambda x:x['distance_km'])[:12],'warnings':[],'retrieved_at':stamp()}
 
     async def area_evidence(self,prop,body):
         results=[]

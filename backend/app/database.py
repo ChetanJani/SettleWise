@@ -60,10 +60,10 @@ class Store:
         self.ready = True
 
     def put_properties(self, properties):
+        if not properties:return
         with Session(self.engine) as session:
-            for item in properties:
-                statement=self.insert(PropertyRecord).values(id=item['id'],payload=item,updated_at=now())
-                session.execute(statement.on_conflict_do_update(index_elements=['id'],set_={'payload':statement.excluded.payload,'updated_at':statement.excluded.updated_at}))
+            statement=self.insert(PropertyRecord).values([{'id':item['id'],'payload':item,'updated_at':now()} for item in properties])
+            session.execute(statement.on_conflict_do_update(index_elements=['id'],set_={'payload':statement.excluded.payload,'updated_at':statement.excluded.updated_at}))
             session.commit()
 
     def insert(self, model):

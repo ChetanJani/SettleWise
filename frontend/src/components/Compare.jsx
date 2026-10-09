@@ -1,4 +1,4 @@
-import {ArrowRight,TrainFront,Coins,Info} from 'lucide-react';
+import {Info} from 'lucide-react';
 import Modal from './Modal';
 import {money,typeLabel,modeLabel} from '../lib/api';
 import {PropertyImage} from './PropertyCard';

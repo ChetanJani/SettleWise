@@ -1,55 +1,90 @@
-# SettleWise — product requirements
+# SettleWise — Product requirements
+
+Updated 9 October 2026. Local prototype for a three-person hackathon team.
 
 ## Purpose
 
-Help people moving for work, education or family life find accommodation near their chosen area and understand practical trade-offs before contacting a provider.
+Help students, graduates, workers, families and travellers compare accommodation near a chosen place using their personal needs, sourced facts and clearly identified unknowns. No signup is required for local exploration, favourites or preferences. Booking and proof of vacancy are outside the MVP.
 
-## Primary experience
+## Core flow
 
-The first screen asks for a preferred living area and an optional work/college destination. Search produces results immediately. Users can then personalise without signing up or completing a mandatory questionnaire.
+Enter **one location** → select one or more **PG, Hostel, Hotel, Flat, House** (All types supported) → find nearby places → refine the collected results → inspect inline details/map → save or compare.
 
-## Users
-
-Graduates, professionals changing jobs or cities, solo renters, couples, families and friends sharing accommodation. Property types: flats, houses/bungalows, PGs, hostels and date-specific hotels.
+The location can be an office, college, neighbourhood, station, hotel or another searchable place. Its selected coordinates are the reference for straight-line distance and requested routes. There is no second destination field or mandatory preference wizard.
 
 ## Functional requirements
 
-| Requirement | Expected behavior |
-| --- | --- |
-| Location search | Nearby plus worldwide autocomplete after three characters, address/country context, selected coordinates used for search; keep destination optional |
-| Cards | Name, type, available photo, source, price if supplied, rating context, known commute/area distance |
-| Personalisation | Budget, strict/flexible policy, type, household count, PG/hostel eligibility, bedrooms, amenities, priorities |
-| Travel | Mode, departure/return times, monthly travel days, optional maximum commute; show both directions |
-| Recommendations | Deterministic preference fit with reasons, trade-offs and evidence coverage |
-| Missing information | Unknown requirements cannot become confirmed matches; clearly separate candidates needing confirmation |
-| Rental quotes | User can enter a monthly quote and known room/capacity details; scope it to their browser |
-| Hotel results | Require stay dates and guest count; distinguish nightly price from total stay price |
-| Details | Place photos, review excerpts/topics, known property facts and source links |
-| Nearby | Grocery, pharmacy, hospital, public transport, petrol, railway, airport; schools for families |
-| Costs | Known rent/maintenance/deposit, optional personal estimates; distinguish missing costs |
-| Area and women's safety | Source leads, limitations, route/building visit questions, community observations |
-| Community | Area/category/date/sentiment/text, unverified label, rate limit and duplicate-resistant helpful votes |
-| Saved | Anonymous browser-scoped persistence in Neon, local device fallback |
-| Compare | 2–4 properties with price units, known facts, commute and trade-offs |
-| Responsive/accessibility | Mobile/tablet/desktop layouts, keyboard controls, labelled inputs, focus-contained dialogs and reduced motion |
+| ID | Requirement | Implementation / constraint |
+| --- | --- | --- |
+| F01 | One worldwide location input | Suggestions after 3 characters and a 1.1-second pause; address context and selected coordinates retained |
+| F02 | Required multi-type selection | All types default; last selected type cannot be removed |
+| F03 | Optional filters before/after search | One Filters control; monthly/nightly budgets, eligibility, people, BHK, radius, amenities, travel, photos and known-only |
+| F04 | Zero-request local filtering | Browser ranks and filters candidate snapshots without provider or recommendation requests |
+| F05 | Fast first results | Discovery cards render before bounded missing-photo enrichment; detail sections load explicitly |
+| F06 | Rich, readable cards | Source image, name, type, price/unit, distance, rating, gender/BHK, amenities, evidence and concerns |
+| F07 | PG/hostel eligibility | Male, Female, Both, Unknown; source-name inference requires user verification |
+| F08 | Unknown prices | Not available; hotel rates without dates say Price needs dates; never invent rent |
+| F09 | Source photographs | Gallery and cached more-photos action; honest missing/broken image fallback; no generated property photos |
+| F10 | Inline detail expansion | Place, Reviews, Nearby, Travel, Safety; no mandatory navigation to a separate page |
+| F11 | Visible map | Landing map, desktop side map and mobile/tablet Map control |
+| F12 | Named map pins | Compact at low zoom, property names at zoom 15+; tooltip and click-to-expand card |
+| F13 | Safety evidence | Documentation coverage for CCTV, guard, controlled entry and lighting; unavailable without facts |
+| F14 | Two-direction routes | Explicit user request, selected mode/times, context-sensitive cache; unknown is not zero |
+| F15 | Nearby essentials | Combined search, sourced straight-line distances; optional schools; coverage is incomplete |
+| F16 | Reviews/concerns | Source excerpts and low-rating warning; no unsupported incident assertions |
+| F17 | Community experiences | Clearly unverified good/issues/serious reports, categories, dates and deduplicated helpful votes |
+| F18 | No-signup local persistence | Preferences, result snapshots, search cache, suggestions and favourites in browser storage |
+| F19 | Compare | 2–4 places, comparable price units and loaded travel facts; no invented comparisons |
+| F20 | Data/credit protection | Server-side credentials, persistent provider cache, concurrent deduplication and local daily cap |
 
-## Architecture and dependencies
+Sorting supports best fit, distance, price, rating, travel time and safety evidence %. Accommodation types not collected in the current search require a new discovery action. Unknown strict-filter facts remain labelled; the known-only setting can exclude them.
 
-React/Vite frontend; FastAPI backend; SQLAlchemy/psycopg with Neon PostgreSQL; SerpApi provider adapters; Leaflet/OpenStreetMap. Environment secrets belong only in the backend. Search caches use bounded memory and concurrency. Independent provider failures should show unavailable information rather than invented replacements.
+## Meaning of safety evidence
 
-## Acceptance criteria
+Percentage = documented boolean answers / four building checks × 100. A documented absent feature counts as an answer. Thus 100% means complete documentation, **not a safe property** or four present features. Ratings never become crime/women's-safety probabilities. The UI explanation and percentage label must preserve this distinction.
 
-1. A location search works before preferences are completed.
-2. Strict budgets do not include known overpriced listings as matches.
-3. Unknown rent, occupancy, eligibility, amenities or required commute cannot silently pass those requirements.
-4. Failed searches do not relabel old results as a new location.
-5. Commute calculations use seconds/metres correctly and show unavailable routes explicitly.
-6. Real and fictional properties never mix within one result set.
-7. Saved places and private entered quotes remain scoped to a browser identifier.
-8. Repeated helpful votes from one browser count once.
-9. Credentials never appear in frontend assets, responses, or source links.
-10. The app builds and critical screens work at 320, 375, 768 and 1440-pixel widths.
+Women-oriented information includes lighting, last-mile access, entry controls, resident experiences and sourced local-report leads. Search/news links and community claims remain unverified. A validated area-risk model needs reliable geographic incident data and is future work.
 
-## Scope boundaries and next phase
+## Design requirements
 
-The local MVP does not book properties, take payments, provide verified criminal statistics, certify safety or claim real-time rental availability. A production rental marketplace needs licensed/owner-verified inventory, quote verification, listing freshness, moderation and production identity/access controls. After that, add richer listing ingestion, neighbourhood infrastructure evidence, owner contact workflows and longer-term saved searches.
+Ivory `#F7F8F4`, deep forest green `#145C45`, white cards, dark text `#14251E`, muted text `#69776F`, sage `#EDF4ED`, border `#E0E6DF`, restrained gold accent `#BC9762`.
+
+Use Inter/Segoe UI/system typography, 16px base and mobile inputs, prominent property names/prices, generous spacing, quiet borders and minimal copy. Main loading uses animated line-drawn homes/skeletons, with reduced-motion support. Keyboard autocomplete, visible focus and accessible modal dismissal are required.
+
+Desktop uses two-column cards with a side map; tablet/mobile offer an inline Map view. Avoid duplicate preference actions, forced steps and mandatory hotel dates.
+
+## Architecture and API budget
+
+React/Vite + Leaflet → FastAPI/Pydantic → SerpApi adapters; SQLAlchemy → Neon or local SQLite. The browser owns instant ranking. Browser storage keeps snapshots; a separate local SQLite cache persists provider responses.
+
+One combined Maps accommodation query per selected point; resolving unselected typed text can add one request. Autocomplete uses one request per uncached paused prefix. At most two missing-photo candidates are enriched after a fresh search. Additional sections are explicit and cached; there/back directions can cost two requests. Filtering, sorting, expanding a card and map zoom cost zero SerpApi requests.
+
+Provider cache: generally 24 hours, photos/autocomplete 7 days; directions adapter uses a shorter TTL while its optional detail snapshot can persist 24 hours. Browser search cache: 24 hours. Source result dates remain visible. Local attempted-request cap: 30/day by default, configurable through `SERPAPI_DAILY_LIMIT`; it does not enforce a global shared-key budget.
+
+Current engines: Google Maps Search/Place, Autocomplete, Photos, Reviews, Directions, and Google Search for local reports. No Airbnb. Hotels are discoverable without dates, but automatic dated hotel-rate retrieval is not in this redesigned flow.
+
+## Acceptance checks
+
+- Exactly one location field and one Filters entry in the primary flow.
+- Selected-coordinate discovery and property distance use the same point.
+- Multi-type choices are retained; zero empty-type searches.
+- Changing ordinary filters/sort emits no HTTP/provider searches.
+- Concurrent identical provider queries consume one outbound request; cache survives restart; daily cap blocks excess attempts.
+- Cards render before optional photo/detail work; opening a card alone does not fetch reviews/routes/nearby.
+- Map names appear after zooming, pin selection expands its card, and filtering preserves map interaction.
+- Male/Female/Both/Unknown labels and honest unavailable price/photo/evidence states exist.
+- Reload restores preferences/results/favourites without automatically searching.
+- Desktop and mobile layouts avoid horizontal page overflow; mobile inputs remain 16px.
+- Frontend production build, backend mock tests and browser fixture checks pass without paid provider calls.
+
+## Data constraints and deployment gaps
+
+Maps is a bounded sample of places, not an authoritative rental/vacancy feed. Reliable prices, BHK, amenities, high-resolution photos and availability need owner/partner inventory. Nearby categories, source reviews and local news coverage can be incomplete. Area-wide average costs and verified crime counts are not implemented.
+
+Browser identifiers are prototype scoping, not authentication. Public deployment needs protected anonymous sessions or appropriate identity controls, HTTPS/CORS configuration, production hosting, shared quota/rate controls, persistent cache hosting, migrations/backups, monitoring, moderation/reporting/removal, approved inventory/source use and map tile usage planning. Worldwide route timezone handling also needs expansion beyond the current India-time adapter.
+
+## Team and demonstration
+
+One member owns UI/map, one backend/cache/data, one QA/docs/demo. Demonstrate a graduate finding a PG near work, filtering instantly, inspecting a sourced photo, zooming for names, requesting one route and saving. Keep a clearly labelled fictional Example fallback and use mocks for development.
+
+See [SettleWise-Project-Brief.txt](SettleWise-Project-Brief.txt) for the full shareable overview and [README.md](README.md) for setup.

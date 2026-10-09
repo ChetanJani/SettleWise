@@ -17,6 +17,9 @@ class FakeProvider:
         p=base_property({'title':'Example PG','place_id':'test','gps_coordinates':{'latitude':23.03,'longitude':72.55}},body.area,body.city)
         return {'lat':23.03,'lng':72.55},[p],[]
     async def overview(self,p,b): return {'images':[],'reviews':[],'commute':None}
+    async def place_only(self,p,b):return {'property_facts':{}}
+    async def photos(self,p,b):return {'images':[]}
+    async def reviews_only(self,p,b):return {'reviews':[]}
     async def nearby(self,p,b): return {'places':[]}
     async def area_evidence(self,p,b): return {'sources':[]}
     async def commute(self,p,b): return None
@@ -37,11 +40,11 @@ class RankingTests(unittest.TestCase):
     def test_lower_cost_scores_better(self):
         r=rank(self.items,self.prefs(priority='cost',budget=100000));prices=[p['price'] for p in r['properties']];self.assertEqual(prices,sorted(prices))
     def test_unknown_gender(self):
-        self.items[0]['gender_restriction']=None;self.assertEqual(len(rank(self.items[:1],self.prefs(gender_requirement='women'))['unconfirmed']),1)
+        self.items[1]['gender_restriction']=None;self.assertEqual(len(rank(self.items[1:2],self.prefs(gender_requirement='women'))['unconfirmed']),1)
     def test_bad_time(self):
         with self.assertRaises(ValidationError):self.prefs(departure_time='25:90')
-    def test_hotel_dates_required(self):
-        with self.assertRaises(ValidationError):self.prefs(property_type='hotel')
+    def test_hotels_allow_no_dates(self):
+        self.assertIsNone(self.prefs(property_type='hotel').check_in)
     def test_dates_order(self):
         with self.assertRaises(ValidationError):self.prefs(check_in=date.today()+timedelta(days=3),check_out=date.today()+timedelta(days=2))
     def test_no_keys_in_source_url(self): self.assertEqual(safe_url('https://example.com/x?api_key=secret&key=secret&q=home'),'https://example.com/x?q=home')
@@ -84,7 +87,7 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
             return {'suggestions':[{'value':'Navsari','subtext':'Gujarat, India','latitude':20.95,'longitude':72.93}]} if params['ll']=='@0,0,3z' else {'suggestions':[{'value':'Navrangpura','subtext':'Ahmedabad, Gujarat, India','latitude':23.04,'longitude':72.55},{'value':'Navsari','subtext':'Gujarat, India','latitude':20.95,'longitude':72.93}]}
         provider.resolve=resolve;provider.search=search
         data=await provider.autocomplete('nav','Ahmedabad')
-        self.assertEqual([p['text'] for p in data],['Navrangpura','Navsari']);self.assertEqual(data[1]['coordinates']['lat'],20.95);self.assertEqual(data[1]['address'],'Gujarat, India');await provider.close()
+        self.assertEqual([p['text'] for p in data],['Navsari']);self.assertEqual(data[0]['coordinates']['lat'],20.95);self.assertEqual(data[0]['address'],'Gujarat, India');await provider.close()
 
     async def test_global_suggestions_survive_nearby_failure(self):
         provider=SerpApi('unused')

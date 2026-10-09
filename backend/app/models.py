@@ -15,6 +15,7 @@ class SearchRequest(BaseModel):
     area: str = Field(min_length=2, max_length=160)
     city: str = Field(default='Ahmedabad', min_length=2, max_length=80)
     location: SelectedLocation | None = None
+    property_types: list[Literal['flat','pg','hostel','hotel','house']] | None = Field(default=None,min_length=1,max_length=5)
     destination: str = Field(default='', max_length=240)
     mode: Literal['live', 'demo'] = 'live'
     property_type: PropertyType = 'any'
@@ -22,7 +23,11 @@ class SearchRequest(BaseModel):
     strict_budget: bool = True
     household: Literal['solo', 'couple', 'family', 'friends'] = 'solo'
     occupants: int = Field(default=1, ge=1, le=20)
-    gender_requirement: Literal['any', 'women', 'men'] = 'any'
+    gender_requirement: Literal['any', 'women', 'men','both','unknown'] = 'any'
+    hotel_budget: int | None = Field(default=None, ge=100, le=1000000)
+    radius_km: float | None = Field(default=None,gt=0,le=50)
+    photos_only: bool = False
+    known_only: bool = False
     bedrooms: int | None = Field(default=None, ge=0, le=10)
     amenities: list[Literal['kitchen','parking','furnished','lift','security','food','accessible','pets']] = Field(default_factory=list, max_length=8)
     priority: Literal['balanced','commute','cost','security','space'] = 'balanced'
@@ -33,7 +38,7 @@ class SearchRequest(BaseModel):
     max_commute: int | None = Field(default=None, ge=5, le=180)
     check_in: date | None = None
     check_out: date | None = None
-    sort: Literal['match','price','commute','rating'] = 'match'
+    sort: Literal['match','price','commute','rating','distance','safety'] = 'match'
 
     @field_validator('area','city','destination')
     @classmethod
@@ -55,17 +60,15 @@ class SearchRequest(BaseModel):
             today = datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
             if self.check_in < today or self.check_out <= self.check_in:
                 raise ValueError('Choose future stay dates with check-out after check-in.')
-        if self.property_type == 'hotel' and not self.check_in:
-            raise ValueError('Choose stay dates to search hotels and their prices.')
         return self
 
 class RecommendationRequest(BaseModel):
-    property_ids: list[str] = Field(max_length=30)
+    property_ids: list[str] = Field(max_length=60)
     preferences: SearchRequest
 
 class DetailRequest(BaseModel):
     preferences: SearchRequest
-    section: Literal['overview','nearby','area'] = 'overview'
+    section: Literal['overview','nearby','area','photos','reviews','commute','place'] = 'overview'
 
 class PropertyInputs(BaseModel):
     price: int = Field(ge=1000, le=1000000)

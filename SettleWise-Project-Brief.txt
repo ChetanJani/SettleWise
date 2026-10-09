@@ -1,0 +1,359 @@
+SETTLEWISE - COMPLETE PROJECT BRIEF
+Updated: 9 October 2026
+Project folder: C:\Users\DELL\0000000\Hackathone Project HCA
+Team: 3 members
+Technology: React + Vite frontend, FastAPI backend, Neon PostgreSQL, SerpApi
+Stage: Local working prototype. Public deployment is a separate milestone.
+
+1. WHAT ARE WE BUILDING?
+------------------------
+SettleWise helps people find accommodation near a place that matters to them.
+That place can be an office, college, neighbourhood, railway station, hotel,
+or another searchable location. Users compare places against their budget,
+travel needs, household size, accommodation type and available information.
+
+Examples:
+- A graduate needs a PG near their first office.
+- A student needs a hostel near college.
+- A family needs a flat near work with daily essentials nearby.
+- A traveller wants hotels near a particular venue.
+- Someone relocating wants to understand the neighbourhood before visiting.
+
+Our central promise: help people make a clearer decision about where to stay.
+Finding a map-listed place does not establish that a room is currently vacant.
+SettleWise is a discovery and comparison platform; booking is outside this MVP.
+
+2. WHAT DOES THE USER WANT?
+---------------------------
+The user wants suitable places quickly, with useful photos and readable cards.
+They should not have to complete a long questionnaire or create an account.
+They should be able to refine results immediately and keep favourites.
+
+The initial interaction:
+1) Enter ONE location: "Where do you want to stay nearby?"
+2) Choose one or more accommodation types, or All types.
+3) Press Find places.
+4) Browse cards and the map.
+5) Adjust optional filters whenever needed.
+
+There is no separate preferred-area and work/college input. The chosen point
+is the reference for property distances and any requested travel estimates.
+
+3. ACCOMMODATION TYPES
+----------------------
+PG, Hostel, Hotel, Flat and House.
+Houses include suitable villas/bungalows when the source classifies them.
+Users can select multiple types. At least one remains selected.
+All types is the default. There is no Airbnb integration.
+
+For PGs and hostels, display eligibility directly on the card:
+Male / Female / Both / Eligibility unknown.
+An explicit provider name can suggest eligibility, but users should verify it.
+Unknown eligibility must never be silently treated as women-only or mixed.
+
+4. FILTERS AND PERSONALISATION
+------------------------------
+Only ONE Filters button is needed. The same filters work before and after search.
+
+Optional filters:
+- Monthly rental budget.
+- Hotel budget per night, separately from monthly rent.
+- Strict budget or flexible budget.
+- PG/hostel gender eligibility.
+- Number of people.
+- Minimum BHK for flats/houses.
+- Distance radius from the chosen location.
+- Amenities: kitchen, parking, furnished, lift, security, meals, accessibility, pets.
+- Photos available only.
+- Confirmed filter matches only.
+- Priority: balanced fit, lower cost, shorter commute, more space, security evidence.
+- Travel mode: public transport, car, two-wheeler, walking, cycling.
+- Going and returning times, maximum one-way minutes, travel days per month.
+
+Sorting: best fit, distance, price, rating, travel time, safety evidence percentage.
+Changing filters or sorting applies to the collected dataset in the browser.
+It does not call SerpApi or the recommendation endpoint again.
+Selecting an accommodation type that was not collected requires a new search
+to discover its inventory; it cannot appear through filtering alone.
+
+5. WHAT SHOULD EACH CARD SHOW?
+------------------------------
+- Real source photo when available, with an expandable photo gallery.
+- Property name and type.
+- PG/hostel eligibility, or relevant BHK information.
+- Price and its unit: month or night.
+- Distance from the selected location.
+- Rating and number of reviews when available.
+- Safety evidence percentage when there is documented building information.
+- Known amenities and capacity.
+- Loaded going/returning travel times.
+- Important low-rating concerns or missing filter information.
+- Save, Compare and Details controls.
+
+Unknown monthly price: "Not available".
+Hotel price without dates/rate data: "Price needs dates".
+Do not invent prices, BHK, availability, photographs or security claims.
+
+Details expand INSIDE the card:
+- Place: address, sharing/capacity, BHK, deposit, maintenance, kitchen, ventilation,
+  documented security and source link. Users can add an unverified rent quote.
+- Reviews: source excerpts with dates/ratings when available.
+- Nearby: sourced service locations and straight-line distances.
+- Travel: both directions for the selected mode/times, loaded on demand.
+- Safety: feature documentation, sourced local reports and community experiences.
+
+Not every source provides every field. Unavailable data stays clearly unknown.
+
+6. MAP EXPERIENCE
+------------------
+The first screen highlights a map beside the search on desktop.
+The results screen keeps a map beside the cards on wider screens.
+On mobile/tablet, a clear Map control opens the map above the cards.
+The selected place has its own marker.
+Zoomed-out property pins stay compact, showing a known price or property type.
+At zoom level 15 and above, pins show the ACTUAL property/PG name.
+Names are also available as marker tooltips.
+Clicking a property pin selects its card and expands its inline details.
+Filtering refreshes visible pins without a paid search.
+
+Leaflet renders the map. OpenStreetMap supplies tiles with attribution.
+Map zooming and panning use map tile requests, not SerpApi credits.
+
+7. PHOTOS
+----------
+Photos are a major part of the experience. Use the source thumbnail immediately.
+Users can open the gallery and request more actual place photos.
+After a fresh search, at most two places missing thumbnails can request photos
+in the background. This is bounded to protect the shared API budget.
+
+Photo requests are cached. No generated interiors or unrelated stock photos
+should represent a real property. A missing/broken source image has an honest
+fallback; a listed building photograph may differ from the available room.
+Universal photo coverage and high-resolution images require a richer inventory
+source or owner-uploaded property photos; Maps cannot guarantee them.
+
+8. SAFETY AND WOMEN'S SAFETY
+----------------------------
+The percentage is labelled SAFETY EVIDENCE, not a probability of being safe.
+It measures documented answers for four building checks:
+CCTV, guard, controlled entry and lighting.
+One documented answer = 25%, two = 50%, three = 75%, four = 100%.
+A documented NO counts as an answered check. Therefore, 100% means complete
+documentation, not that all security features exist or a place is safe.
+No documented answers = unavailable.
+Google ratings are NOT converted into women's safety or crime percentages.
+
+Women-oriented assessment should include lighting, access control, late-night
+last-mile transport, resident experiences and recent sourced local information.
+Community posts are unverified. Helpful votes do not verify an allegation.
+News/search results are leads to read; they are not verified crime counts.
+An absence of reports is not proof of safety.
+
+A genuine area crime-risk score would require trustworthy geographic incident
+data, a defensible method, dates/coverage and validation. It is future work.
+
+9. NEARBY INFORMATION WE WANT TO SUPPORT
+---------------------------------------
+Petrol pumps, public transport stops/stations, grocery stores, pharmacies,
+hospitals, schools when relevant, restaurants and everyday services.
+
+The MVP uses a combined nearby-service search rather than one call per category.
+This reduces cost, but results are not exhaustive and may omit categories.
+Nearby cards show available source information; no results means unknown,
+not that the neighbourhood has no such services.
+Area-wide average food/hotel/living prices need reliable comparable price data.
+Do not estimate them from star ratings or invent an average for the MVP.
+
+10. HOW SEARCH WORKS AND HOW WE SAVE API CREDITS
+-----------------------------------------------
+One user search action is different from one provider API request.
+
+Current strategy:
+- Autocomplete: one worldwide provider request per uncached paused prefix.
+  Start after 3 characters and about 1.1 seconds. Cache suggestions for 7 days.
+- Chosen suggestion includes coordinates; this avoids another place lookup.
+- Accommodation discovery: ONE combined Maps query for selected types.
+- If coordinates are missing, resolving the typed location may add one request.
+- Cards appear before optional enrichment finishes.
+- Extra photos, reviews, place facts and nearby services load on demand.
+- Routes load only when explicitly requested, with up to two directions calls.
+- Opening a card does not automatically request every detail section.
+- Filtering and sorting: ZERO API requests.
+- Cached searches can be reused for 24 hours.
+
+Approximate uncached request budget:
+Autocomplete pause: 1.
+Search after a coordinate-bearing suggestion: 1 discovery request.
+Search with only typed text: 1 resolution + 1 discovery.
+Automatic missing-photo enrichment: at most 2 additional photo requests.
+Explicit more photos, reviews, place facts, nearby or local reports: usually 1 each.
+Explicit there/back travel: up to 2 direction requests.
+Opening cards, filtering, sorting, saving locally, map zoom: 0 SerpApi calls.
+
+The backend persists provider responses in SQLite and deduplicates concurrent
+identical requests. Successful responses normally cache for 24 hours; photos
+and autocomplete cache for 7 days. Optional detail sections cache for 24 hours.
+There is a default local daily provider-request limit of 30.
+SERPAPI_DAILY_LIMIT can change it. This is not the account's billing counter.
+Other teammates/backends sharing a key can consume credits outside this limit.
+
+A combined Maps query may not return all property types equally well. Broader
+inventory needs additional explicitly budgeted searches or an owner/feed source.
+
+11. LOCAL SAVING WITHOUT LOGIN
+-------------------------------
+Browser localStorage stores preferences, the current result snapshot,
+recent searches, autocomplete suggestions and saved places.
+Returning to the same browser restores the current session without auto-search.
+Clearing site data, incognito mode or another device does not retain this data.
+Local storage is not an account and does not provide cross-device syncing.
+
+Neon stores property snapshots, browser-scoped entered quotes, observations,
+helpful votes and supports saved-place endpoints. A random browser identifier
+scopes current API data; it is a local prototype mechanism, not authentication.
+
+12. DESIGN AND COLOUR THEME
+---------------------------
+Mood: minimal, calm, polished, understated royal quality.
+Use space, typography and well-framed photographs rather than decorative clutter.
+
+Main colours:
+- Deep forest green: #145C45 (brand, main action, selected controls).
+- Warm ivory: #F7F8F4 (page background).
+- White: #FFFFFF (cards, inputs, panels).
+- Dark green-black: #14251E (main text).
+- Muted green-grey: #69776F (secondary text).
+- Soft sage: #EDF4ED (subtle backgrounds).
+- Light border: #E0E6DF.
+- Muted gold: #BC9762 (small brand accent).
+
+Typography: Inter when available, Segoe UI/Arial/system fallback.
+Base size: 16px. Prominent card names about 20-21px; prices about 25px.
+Keep secondary labels brief. Small metadata is supplementary, not the main answer.
+Use rounded cards, quiet borders, soft shadows and clear focus states.
+
+Desktop: search + featured map initially; two-column cards + side map in results.
+Tablet: generous controls, two-column cards, accessible map toggle.
+Mobile: one-column cards, 16px inputs, touch-friendly controls, map above cards.
+Loading: animated line-drawn homes and shimmering card placeholders.
+Respect reduced-motion preferences. No spinning-circle loader in the main flow.
+No duplicate preference buttons, mandatory steps or mandatory hotel dates.
+
+13. TECHNOLOGY AND API LIST
+---------------------------
+Frontend: React, Vite, lucide-react icons, Leaflet, CSS, localStorage.
+Backend: FastAPI, Pydantic, httpx, SQLAlchemy, Python.
+Database: Neon PostgreSQL when DATABASE_URL is supplied; local SQLite otherwise.
+Provider cache: local SQLite separate from application data.
+
+SerpApi engines used by the current redesigned flow:
+- Google Maps Search: location resolution, accommodation and nearby discovery.
+- Google Maps Place: additional place information.
+- Google Maps Autocomplete: worldwide suggestions.
+- Google Maps Photos: source photographs.
+- Google Maps Reviews: recent source review excerpts.
+- Google Maps Directions: requested two-direction travel estimates.
+- Google Search: local reports/advisory sources.
+
+One SerpApi API key accesses these engines subject to the account's coverage,
+limits and billing. No separate Google Maps API key is used for the Leaflet map.
+Neon needs its own DATABASE_URL. Never expose either secret in frontend code.
+Airbnb is excluded. Current hotel discovery does not request live dated hotel rates.
+
+14. ENVIRONMENT FILE AND RUNNING LOCALLY
+---------------------------------------
+Private file: backend/.env
+Example (replace placeholders; quotes are allowed):
+
+SERPAPI_API_KEY="your_serpapi_key"
+DATABASE_URL="postgresql://user:password@host/database?sslmode=require"
+SERPAPI_DAILY_LIMIT=30
+
+Do not put real credentials in this document, README, Git or a VITE_ variable.
+The ignored .env file is added separately by each teammate.
+Node 22.12+ or 24 and Python 3.12 are the recommended development versions.
+
+From the project root in PowerShell:
+.\setup.ps1
+.\start.ps1
+
+Frontend: http://127.0.0.1:5174/
+Backend API docs: http://127.0.0.1:8001/docs
+Stop: .\stop.ps1
+The scripts start hidden service processes and keep logs in .local/.
+README.md includes manual Windows/macOS/Linux commands and troubleshooting.
+
+15. REQUIREMENTS AND ACCEPTANCE CRITERIA
+----------------------------------------
+Must have:
+- Exactly one location input and required accommodation selection.
+- Results and distances anchored to the chosen location.
+- Immediate optional filters without repeated provider searches.
+- Real source images when available; honest unknown-state handling.
+- Clear PG eligibility and relevant property details.
+- Inline details, source links, map/card interaction, named pins on zoom.
+- Local preference/result/favourite persistence without login.
+- Cached, bounded API usage and distinct demo/live data.
+- Responsive accessible UI with good loading and error states.
+- Credentials remain on the backend.
+
+Checks before calling the local milestone complete:
+Frontend production build, backend mock tests, desktop/mobile browser checks,
+map zoom-name verification, no-request filters, restore/saves, inline details,
+keyboard suggestions and empty/error states.
+Tests should use fixtures/mocks and temporary databases, preserving SerpApi credits.
+
+16. WHAT IS NOT GUARANTEED YET?
+-------------------------------
+Complete rental inventory, current vacancies, exact rent, complete amenities,
+universal property photos, authoritative crime data, live traffic accuracy,
+women's safety probabilities or average neighbourhood living costs.
+These depend on source coverage and cannot be solved by UI alone.
+Unknown data must remain unknown; user-entered quotes remain unverified.
+Search results are a bounded sample, not every available property in the world.
+
+17. BEFORE PUBLIC DEPLOYMENT
+-----------------------------
+- Choose production frontend/backend hosting and environment configuration.
+- Configure HTTPS, origin/CORS rules and persistent provider-cache storage.
+- Replace browser-identifier-only private API access with protected identity
+  or signed anonymous sessions, while preserving the no-signup experience.
+- Add shared rate limits and API-spend controls across all backend instances.
+- Implement moderation, reporting/removal and durable community abuse controls.
+- Review allowed source use and public map tile policy/traffic requirements.
+- Add migrations, database backups, monitoring and tested failure recovery.
+- Test deployment routing, slow networks, accessibility and important breakpoints.
+- Establish a real property inventory/owner workflow for reliable rent and details.
+
+No local prototype should be labelled production-ready merely because it starts.
+
+18. THREE-PERSON TEAM PLAN
+--------------------------
+Person 1: frontend, card clarity, filters, responsive UI and map behaviour.
+Person 2: FastAPI, provider/cache logic, database and data quality.
+Person 3: tests, real sample research, documentation, pitch and deployment checks.
+All members review the central user flow and avoid repeated paid API testing.
+
+19. HACKATHON DEMONSTRATION
+---------------------------
+Show one clear story: a graduate moving near a new office.
+Choose a place -> choose PG/hostel -> show real sourced cards/map -> filter
+budget and eligibility immediately -> compare options -> load one route -> save.
+Highlight named map pins, transparent missing facts and cached API usage.
+Have a clearly labelled example mode ready when connectivity/credits are limited.
+
+Pitch differentiators:
+Place-centred relocation decisions, comparison across accommodation types,
+usable map/card interaction, no-signup persistence, transparent safety evidence,
+and API-efficient filtering. Demonstrate these behaviours rather than promising
+unverified AI safety predictions or exhaustive rental coverage.
+
+20. NEXT IMPROVEMENTS
+---------------------
+Owner/partner inventory, owner-uploaded photos, verified property facts,
+better multi-type coverage, optional dated hotel rates, trustworthy location
+safety datasets, shared cache/quota enforcement, moderation and deployment.
+Later: multilingual interface, saved-location alerts and relocation checklists.
+
+This brief describes the agreed product direction and its honest constraints.
+README.md explains setup and implementation. PRD.md lists product requirements.

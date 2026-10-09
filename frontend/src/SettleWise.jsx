@@ -1,70 +1,88 @@
-import {useState,useEffect,useRef,lazy,Suspense} from 'react';
-import {Heart,SlidersHorizontal,ArrowRight,ArrowLeft,Map,Search,House,Check,ArrowUpRight,X,Bookmark,LayoutGrid,Info,LoaderCircle,RotateCcw,ShieldCheck} from 'lucide-react';
+import {useState,useEffect,useRef,useMemo,useLayoutEffect} from 'react';
+import {House,Heart,SlidersHorizontal,Map,ArrowLeft,Check,ArrowRight,MapPin} from 'lucide-react';
 import DestinationSearch from './components/DestinationSearch';
 import PropertyCard from './components/PropertyCard';
 import Preferences from './components/Preferences';
-import PropertyDetail from './components/PropertyDetail';
 import Compare from './components/Compare';
-import Modal from './components/Modal';
-import {api,post,defaults,loadLocal,saveLocal,money,typeLabel} from './lib/api';
-const MapResults=lazy(()=>import('./components/MapResults'));
+import MapResults from './components/MapResults';
+import Loading from './components/Loading';
+import {api,post,defaults,loadLocal,saveLocal,typeLabel} from './lib/api';
+import {rankLocal,routeKey,accommodationTypes} from './lib/recommend';
 
+const WORKSPACE='sw-workspace-v3',SEARCHES='sw-searches-v3';
+const restored=loadLocal(WORKSPACE,{});
+const initial={...defaults,...restored.preferences,property_types:restored.preferences?.property_types?.length?restored.preferences.property_types:accommodationTypes};
+function searchKey(f){return JSON.stringify([f.mode,f.area.trim().toLowerCase(),f.location?.lat,f.location?.lng,[...f.property_types].sort()])}
+function sectionKey(section,f){return section==='commute'?`commute|${routeKey(f)}`:section==='nearby'?`nearby|${f.household}`:section}
 export default function SettleWise(){
-  const [health,setHealth]=useState(null),[preferences,setPreferences]=useState(defaults),[result,setResult]=useState(null),[view,setView]=useState('explore'),[busy,setBusy]=useState(false),[error,setError]=useState(''),[toast,setToast]=useState('');
-  const [saved,setSaved]=useState(()=>loadLocal('sw-saved',[])),[compare,setCompare]=useState([]),[panel,setPanel]=useState(null),[selected,setSelected]=useState(null),[mapVisible,setMapVisible]=useState(false),[highlighted,setHighlighted]=useState(null);
-  const sequence=useRef(0),searchController=useRef(null),toastTimer=useRef(null);
-  const savedRevision=useRef(0);
-  const allProperties=result?[...(result.properties||[]),...(result.unconfirmed||[])]:[];
-  const displayed=view==='saved'?saved:result?.properties||[];
-  const activeMode=preferences.mode;
-  useEffect(()=>{
-    api('/health').then(h=>{setHealth(h);setPreferences(p=>({...p,mode:h.default_mode}));if(h.database_ready){const revision=savedRevision.current;api('/saved').then(d=>{if(savedRevision.current===revision){setSaved(d.properties);saveLocal('sw-saved',d.properties)}}).catch(()=>{})}}).catch(()=>setError('The local backend is unavailable. Start both services, then refresh.'));
-    return()=>{searchController.current?.abort();clearTimeout(toastTimer.current)};
-  },[]);
-  function notify(text){setToast(text);clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(''),4500)}
-  async function search(p){
-    const seq=++sequence.current;searchController.current?.abort();const controller=new AbortController();searchController.current=controller;
-    setBusy(true);setError('');setView('explore');setPanel(null);setPreferences(p);setResult(null);
-    try{const data=await post('/search',p,controller.signal);if(seq===sequence.current){setResult(data);setCompare([]);window.scrollTo({top:0,behavior:'instant'})}}
-    catch(e){if(e.name!=='AbortError'&&seq===sequence.current)setError(e.message)}finally{if(seq===sequence.current)setBusy(false)}
-  }
-  async function apply(p){
-    setPanel(null);
-    if(!result){setPreferences(p);notify('Preferences saved. Choose an area to start exploring.');return}
-    if(p.property_type!==preferences.property_type||p.check_in!==preferences.check_in||p.check_out!==preferences.check_out||(p.property_type==='hotel'&&p.occupants!==preferences.occupants)){await search(p);return}
-    const seq=++sequence.current;searchController.current?.abort();const controller=new AbortController();searchController.current=controller;
-    setPreferences(p);setBusy(true);setError('');
-    try{const data=await post('/recommendations',{property_ids:result.candidate_ids,preferences:p},controller.signal);if(seq===sequence.current)setResult(r=>({...r,...data}))}catch(e){if(e.name!=='AbortError')setError(e.message)}finally{if(seq===sequence.current)setBusy(false)}
-  }
-  async function save(p){
-    savedRevision.current+=1;
-    const exists=saved.some(x=>x.id===p.id);const next=exists?saved.filter(x=>x.id!==p.id):[p,...saved];
-    setSaved(next);saveLocal('sw-saved',next);
-    try{await api(`/saved/${p.id}`,{method:exists?'DELETE':'POST'});notify(exists?'Removed from saved places.':'Saved for this browser. No account needed.')}
-    catch{notify('Saved on this device. Database sync is currently unavailable.')}
-  }
-  function toggleCompare(p){setCompare(items=>{if(items.some(x=>x.id===p.id))return items.filter(x=>x.id!==p.id);if(items.length===4){notify('Compare up to four places at a time.');return items}return [...items,p]})}
-  function travel(id,commute){setResult(r=>r?{...r,properties:r.properties.map(p=>p.id===id?{...p,commute}:p),unconfirmed:r.unconfirmed.map(p=>p.id===id?{...p,commute}:p)}:r);setCompare(items=>items.map(p=>p.id===id?{...p,commute}:p))}
-  function open(p){setSelected(p);setPanel('detail')}
-  function updated(p){setSelected(p);setSaved(items=>{const next=items.map(x=>x.id===p.id?p:x);saveLocal('sw-saved',next);return next});setCompare(items=>items.map(x=>x.id===p.id?p:x));apply(preferences);notify('Your rental details were saved. Matches updated.');}
-  function changeMode(mode){const next={...preferences,mode};if(result){search(next)}else{setPreferences(next)}notify(mode==='demo'?'Example mode uses fictional properties and prices.':'Live mode uses your configured search provider.')}
-  function goHome(){setView('explore');setResult(null);setError('');setCompare([]);setMapVisible(false);window.scrollTo({top:0,behavior:'instant'})}
-  const cards=items=>items.map(p=><PropertyCard key={p.id} property={p} best={result?.best_id===p.id&&view!=='saved'} saved={saved.some(x=>x.id===p.id)} compared={compare.some(x=>x.id===p.id)} onSave={save} onCompare={toggleCompare} onOpen={open} onHover={setHighlighted}/>);
-  return <><header className="site-header"><button className="brand" onClick={goHome} aria-label="SettleWise home"><span className="brand-symbol"><House size={19}/></span>SettleWise<span className="brand-dot">.</span></button><nav aria-label="Main navigation"><button className={view==='saved'?'nav-active':''} onClick={()=>{setView('saved');setError('');window.scrollTo(0,0)}}><Heart size={17}/><span>Saved</span>{saved.length>0&&<small>{saved.length}</small>}</button>{result&&<button onClick={()=>setPanel('preferences')}><SlidersHorizontal size={17}/><span>Preferences</span></button>}<div className="data-mode"><button className={activeMode==='live'?'active':''} onClick={()=>changeMode('live')} aria-pressed={activeMode==='live'}>Live</button><button className={activeMode==='demo'?'active':''} onClick={()=>changeMode('demo')} aria-pressed={activeMode==='demo'}>Example</button></div></nav></header>
-    {view==='explore'&&!result?<main className="landing"><div className="landing-intro"><span className="eyebrow">A THOUGHTFUL PLACE TO START</span><h1>Live closer to<br className="mobile-break"/> what matters.</h1><p>Find a place around your work, study and everyday life.</p></div><DestinationSearch preferences={preferences} onSearch={search} busy={busy} live={activeMode==='live'&&health?.serpapi_configured}/>{error&&<div className="search-error" role="alert"><Info size={19}/><div><strong>Let’s try that again.</strong><p>{error}</p></div></div>}<p className="landing-reassurance">Explore first. Personalise when you’re ready. No account needed.</p><div className="suggested-areas"><span>A few places to start</span>{['Navrangpura','Vastrapur','Satellite'].map(area=><button key={area} disabled={busy} onClick={()=>search({...preferences,area,city:'Ahmedabad'})}>{area}<ArrowUpRight size={13}/></button>)}</div><div className="landing-bottom"><div><span className="mini-icon"><TrainIcon/></span><span>Life beyond the listing<small>Commute, costs and everyday essentials.</small></span></div><div><ShieldCheck size={20}/><span>A clearer picture<small>Useful evidence, with honest limitations.</small></span></div></div>{activeMode==='demo'&&<p className="example-notice"><Info size={14}/>Example mode shows fictional properties, prices and routes.</p>}</main>:<main className="results-page"><div className="results-top">{view==='saved'?<><button className="back-link" onClick={()=>setView('explore')}><ArrowLeft size={15}/>Back to exploring</button><div className="results-heading"><div><span className="eyebrow">YOUR SHORTLIST</span><h1>Places worth keeping.</h1><p>Saved for this browser. Compare before deciding.</p></div><span className="saved-count">{saved.length} saved</span></div></>:<><DestinationSearch preferences={preferences} onSearch={search} busy={busy} compact live={activeMode==='live'&&health?.serpapi_configured}/><div className="results-heading"><div><span className="eyebrow">{preferences.city.toUpperCase()} · YOUR NEXT CHAPTER</span><h1>{result?.personalised?'Best matches for you.':`Places around ${preferences.area}.`}</h1><p>{result?.personalised?'Your priorities, with the trade-offs made clear.':'A few places to explore. Add preferences to make them yours.'}</p></div><button className="secondary guided-button" onClick={()=>setPanel('guided')}>Help me choose<ArrowRight size={15}/></button></div><div className="results-toolbar"><div className="filter-chips"><button className={preferences.budget?'has-filter':''} onClick={()=>setPanel('preferences')}>{preferences.budget?money(preferences.budget):'Budget'}</button><button className={preferences.property_type!=='any'?'has-filter':''} onClick={()=>setPanel('preferences')}>{preferences.property_type==='any'?'Property type':typeLabel[preferences.property_type]}</button><button className={preferences.household!=='solo'?'has-filter':''} onClick={()=>setPanel('preferences')}>Who’s staying</button><button className="filters-chip" onClick={()=>setPanel('preferences')}><SlidersHorizontal size={14}/>All filters</button></div><div className="view-controls"><select aria-label="Sort places" value={preferences.sort} onChange={e=>apply({...preferences,sort:e.target.value})}><option value="match">Best match</option><option value="price">Price</option><option value="commute">Commute</option><option value="rating">Rating</option></select><button className={mapVisible?'active':''} onClick={()=>{if(innerWidth<1100)setPanel('map');else setMapVisible(v=>!v)}}><Map size={15}/>Map</button></div></div></>}
-    {error&&<div className="search-error" role="alert"><Info size={18}/><p>{error}</p></div>}{result?.mode==='demo'&&view==='explore'&&<div className="result-notice"><Info size={15}/>Fictional example properties and routes. Switch to Live for real place searches.</div>}{busy&&<div className="loading-line" role="status"><LoaderCircle className="spin" size={16}/>{preferences.priority==='commute'?'Checking routes and updating your matches…':'Finding nearby options…'}</div>}</div>
-    <div className={`results-layout ${mapVisible&&view!=='saved'?'with-map':''}`}><div className="list-column">{busy&&!result?<div className="property-grid">{Array.from({length:6},(_,i)=><div className="skeleton-card" key={i}><i/><span/><span/><span/></div>)}</div>:displayed.length?<div className="property-grid">{cards(displayed)}</div>:<div className="empty-state"><span className="round-icon">{view==='saved'?<Bookmark size={27}/>:<Search size={27}/>}</span><h2>{view==='saved'?'Your shortlist starts here.':'Nothing fully matches yet.'}</h2><p>{view==='saved'?'Tap the heart on a place to keep it for later.':'Try adjusting a preference, or confirm the missing details below. We won’t silently ignore your must-haves.'}</p><button className="secondary" onClick={()=>view==='saved'?setView('explore'):setPanel('preferences')}>{view==='saved'?'Explore places':'Adjust preferences'}<ArrowRight size={15}/></button></div>}
-      {view==='explore'&&result?.unconfirmed?.length>0&&<section className="unconfirmed-section"><div className="section-heading"><div><span className="eyebrow">LOOK A LITTLE CLOSER</span><h2>Places to check with the provider.</h2><p>These have missing information. They aren’t confirmed matches for your requirements.</p></div><span className="count-badge">{result.unconfirmed.length}</span></div><div className="property-grid">{cards(result.unconfirmed)}</div></section>}
-      {view==='explore'&&result?.listing_leads?.length>0&&<section className="listing-leads"><span className="eyebrow">MORE RENTAL OPTIONS</span><h2>Continue with listing sources.</h2><p>External listing leads. Prices and availability have not been verified here.</p><div>{result.listing_leads.map(l=><a key={l.url} href={l.url} target="_blank" rel="noreferrer"><span><strong>{l.title}</strong><small>{l.snippet}</small></span><ArrowUpRight size={17}/></a>)}</div></section>}
-    </div>{mapVisible&&view!=='saved'&&<aside className="desktop-map"><Suspense fallback={<div className="map-loading">Loading map…</div>}><MapResults properties={allProperties} centre={result?.area_location} onSelect={open} highlighted={highlighted}/></Suspense></aside>}</div><footer className="results-footer"><Info size={14}/><p>{view==='saved'?'Saved details can change. Check the source before arranging a visit.':result?.scoring_note||'Confirm price, room availability and rental terms at the source.'}</p>{view==='explore'&&<button className="text-button" onClick={()=>apply({...defaults,area:preferences.area,city:preferences.city,destination:preferences.destination,mode:preferences.mode})}><RotateCcw size={13}/>Reset preferences</button>}</footer></main>}
-    <footer className="site-footer"><span>SettleWise<span className="brand-dot">.</span></span><p>A better decision starts with a clearer picture.</p><small>Made for your next chapter.</small></footer>
-    {compare.length>0&&<div className="compare-bar"><span><strong>{compare.length}</strong> {compare.length===1?'place':'places'} to compare</span><button className="text-button" onClick={()=>setCompare([])}>Clear</button><button className="primary" disabled={compare.length<2} onClick={()=>setPanel('compare')}>Compare<ArrowRight size={16}/></button></div>}
-    <nav className="mobile-nav" aria-label="Mobile navigation"><button className={view==='explore'?'active':''} onClick={()=>{setView('explore');window.scrollTo(0,0)}}><Search size={20}/><span>Explore</span></button><button className={view==='saved'?'active':''} onClick={()=>{setView('saved');window.scrollTo(0,0)}}><Heart size={20}/><span>Saved{saved.length?` (${saved.length})`:''}</span></button><button onClick={()=>setPanel('preferences')}><SlidersHorizontal size={20}/><span>Preferences</span></button></nav>
-    {toast&&<div className="toast" role="status"><Check size={17}/>{toast}</div>}
-    {['preferences','guided'].includes(panel)&&<Preferences value={preferences} guided={panel==='guided'} onApply={apply} onClose={()=>setPanel(null)}/>}
-    {panel==='detail'&&selected&&<PropertyDetail property={selected} preferences={{...preferences,area:selected.area,city:selected.city,property_type:selected.type==='hotel'?'hotel':preferences.property_type==='hotel'?'any':preferences.property_type,mode:selected.is_demo?'demo':'live',...(selected.stay_dates?{check_in:selected.stay_dates.check_in,check_out:selected.stay_dates.check_out,occupants:selected.stay_dates.guests}:{})}} saved={saved.some(x=>x.id===selected.id)} onSave={save} onCompare={toggleCompare} onClose={()=>setPanel(null)} onTravel={travel} onUpdated={updated}/>}
-    {panel==='compare'&&compare.length>=2&&<Compare properties={compare} preferences={preferences} onClose={()=>setPanel(null)}/>}
-    {panel==='map'&&<Modal title="Explore the area" onClose={()=>setPanel(null)} wide className="map-modal"><Suspense fallback={<div className="map-loading">Loading map…</div>}><MapResults properties={allProperties} centre={result?.area_location} onSelect={p=>{setSelected(p);setPanel('detail')}} highlighted={highlighted}/></Suspense></Modal>}
-  </>;
+ const [preferences,setPreferences]=useState(initial),[result,setResult]=useState(restored.result||null),[health,setHealth]=useState(null),[view,setView]=useState('explore'),[busy,setBusy]=useState(false),[error,setError]=useState(''),[panel,setPanel]=useState(null),[toast,setToast]=useState('');
+ const [saved,setSaved]=useState(()=>loadLocal('sw-saved',[])),[compare,setCompare]=useState([]),[mapVisible,setMapVisible]=useState(false),[highlighted,setHighlighted]=useState(null),[focused,setFocused]=useState(null),[preview,setPreview]=useState(initial.location),[loading,setLoading]=useState({});
+ const sequence=useRef(0),controller=useRef(null),timer=useRef(null),pending=useRef(new globalThis.Map());
+ const current=useRef({result,preferences,saved});useLayoutEffect(()=>{current.current={result,preferences,saved}},[result,preferences,saved]);
+ useEffect(()=>{api('/health').then(h=>{setHealth(h);if(!restored.preferences&&!h.serpapi_configured)setPreferences(p=>({...p,mode:'demo'}))}).catch(()=>setError('Backend unavailable. Start the local services.'));return()=>{controller.current?.abort();clearTimeout(timer.current)}},[]);
+ useEffect(()=>{saveLocal(WORKSPACE,{preferences,result})},[preferences,result]);
+ useEffect(()=>{saveLocal('sw-saved',saved)},[saved]);
+ const candidates=useMemo(()=>result?.candidates||[...(result?.properties||[]),...(result?.unconfirmed||[])],[result]);
+ const ranked=useMemo(()=>rankLocal(view==='saved'?saved:candidates,preferences),[candidates,saved,view,preferences]);
+ const displayed=useMemo(()=>[...ranked.properties,...ranked.unconfirmed],[ranked]);
+ function notify(s){setToast(s);clearTimeout(timer.current);timer.current=setTimeout(()=>setToast(''),3500)}
+ function updateProperty(id,patch){
+  const merge=p=>p.id===id?{...p,...patch,details:{...p.details,...patch.details},routes:{...p.routes,...patch.routes}}:p;
+  setResult(r=>r?{...r,candidates:(r.candidates||[...(r.properties||[]),...(r.unconfirmed||[])]).map(merge)}:r);
+  setSaved(s=>s.map(merge));setCompare(s=>s.map(merge));
+  const cache=loadLocal(SEARCHES,{});
+  for(const entry of Object.values(cache))if(entry.data?.candidates)entry.data.candidates=entry.data.candidates.map(merge);
+  saveLocal(SEARCHES,cache);
+ }
+ async function enrich(p,section,f=current.current.preferences){
+  const key=sectionKey(section,f),token=`${p.id}|${key}`;
+  const freshest=current.current.result?.candidates?.find(x=>x.id===p.id)||current.current.saved.find(x=>x.id===p.id)||p;
+  if(freshest.details?.[key]&&Date.now()-(freshest.details[key].saved_at||0)<86400000)return freshest.details[key];
+  if(pending.current.has(token))return pending.current.get(token);
+  const seq=sequence.current;
+  const request=(async()=>{
+   setLoading(s=>({...s,[p.id]:key}));
+   try{
+    const data=await post(`/properties/${encodeURIComponent(p.id)}/details`,{section,preferences:{...f,mode:p.is_demo?'demo':'live',destination:f.area}});
+    const {property,...details}=data;details.saved_at=Date.now();
+    if(seq===sequence.current){const patch={details:{[key]:details},detail_error:null};if(data.images)patch.images=data.images;if(data.commute)patch.routes={[routeKey(f)]:data.commute};if(property?.security_facts)patch.security_facts=property.security_facts;updateProperty(p.id,patch)}
+    return details;
+   }catch(e){if(seq===sequence.current)updateProperty(p.id,{detail_error:e.message});return null}
+   finally{pending.current.delete(token);setLoading(s=>{const next={...s};delete next[p.id];return next})}
+  })();pending.current.set(token,request);return request;
+ }
+ async function search(f){
+  if(!f.property_types.length)return;
+  const seq=++sequence.current;controller.current?.abort();controller.current=new AbortController();setPreferences(f);setPreview(f.location);setView('explore');setError('');setCompare([]);setFocused(null);setPanel(null);
+  const cache=loadLocal(SEARCHES,{}),cached=cache[searchKey(f)];
+  if(cached&&Date.now()-cached.at<86400000){setResult(cached.data);setBusy(false);notify('Loaded from this device');return}
+  setBusy(true);setResult(null);
+  try{
+   const data=await post('/search',f,controller.current.signal);
+   if(seq!==sequence.current)return;
+   data.candidates=(data.candidates||[...(data.properties||[]),...(data.unconfirmed||[])]).map(p=>({...p,...(p.is_demo&&p.commute?{routes:{[routeKey(f)]:p.commute}}:{})}));
+   setResult(data);setBusy(false);saveLocal(SEARCHES,Object.fromEntries(Object.entries({...cache,[searchKey(f)]:{at:Date.now(),data}}).slice(-6)));
+   // Cards render immediately. At most two missing-photo places are enriched afterwards.
+   const missing=data.candidates.filter(p=>!p.is_demo&&!p.images?.length&&p.data_id).slice(0,2);
+   for(const p of missing){if(seq!==sequence.current)break;await enrich(p,'photos',f)}
+  }catch(e){if(e.name!=='AbortError'&&seq===sequence.current)setError(e.message)}finally{if(seq===sequence.current)setBusy(false)}
+ }
+ function apply(f){setPreferences(f);setPanel(null)}
+ function save(p){setSaved(s=>s.some(x=>x.id===p.id)?s.filter(x=>x.id!==p.id):[p,...s]);}
+ function toggleType(type){setPreferences(f=>({...f,property_types:type==='all'?accommodationTypes:f.property_types.includes(type)?f.property_types.length===1?f.property_types:f.property_types.filter(t=>t!==type):[...f.property_types,type]}))}
+ function toggleCompare(p){setCompare(s=>s.some(x=>x.id===p.id)?s.filter(x=>x.id!==p.id):s.length<4?[...s,p]:s)}
+ function selectPin(p){setFocused(p.id);document.getElementById(`card-${p.id}`)?.scrollIntoView({behavior:'smooth',block:'center'})}
+ function home(){setView('explore');setResult(null);setCompare([]);setError('');window.scrollTo(0,0)}
+ const landing=view==='explore'&&!result&&!busy;
+ const filterCount=[preferences.budget,preferences.hotel_budget,preferences.gender_requirement!=='any',preferences.occupants>1,preferences.bedrooms!=null,preferences.amenities.length,preferences.radius_km,preferences.max_commute,preferences.photos_only,preferences.known_only,preferences.priority!=='balanced',preferences.household==='family'].filter(Boolean).length;
+ const searchControls=<><DestinationSearch preferences={preferences} onSearch={search} busy={busy} live={preferences.mode==='live'&&health?.serpapi_configured} onLocation={setPreview}/><div className="search-options"><div className="type-options" role="group" aria-label="Accommodation types"><button className={preferences.property_types.length===5?'selected':''} onClick={()=>toggleType('all')} aria-pressed={preferences.property_types.length===5}>All types</button>{accommodationTypes.map(type=><button key={type} className={preferences.property_types.includes(type)?'selected':''} onClick={()=>toggleType(type)} aria-pressed={preferences.property_types.includes(type)}>{typeLabel[type]}</button>)}</div><button className="secondary filters-button" onClick={()=>setPanel('filters')}><SlidersHorizontal size={18}/>Filters{filterCount>0&&<span>{filterCount}</span>}</button></div></>;
+ const map=<MapResults properties={displayed} centre={result?.area_location||preview} onSelect={selectPin} highlighted={highlighted||focused}/>;
+ return <><header className="site-header"><button className="brand" aria-label="SettleWise home" onClick={home}><span className="brand-symbol"><House size={20}/></span>SettleWise<span className="brand-dot">.</span></button><nav><div className="data-mode"><button className={preferences.mode==='live'?'active':''} onClick={()=>setPreferences(f=>({...f,mode:'live'}))}>Live</button><button className={preferences.mode==='demo'?'active':''} onClick={()=>setPreferences(f=>({...f,mode:'demo'}))}>Example</button></div><button className={view==='saved'?'nav-active':''} onClick={()=>setView(v=>v==='saved'?'explore':'saved')}><Heart size={19}/>Saved{saved.length>0&&<span className="count-badge">{saved.length}</span>}</button></nav></header>
+ <main className={landing?'landing':'results-page'}>{landing?<div className="landing-layout"><section className="landing-intro"><span className="eyebrow">YOUR NEXT CHAPTER</span><h1>Find your place.<br/><span>Feel at home.</span></h1><p>Live closer to what matters.</p><div className="landing-search">{searchControls}</div></section><aside className="map-feature"><div className="map-feature-heading"><Map size={21}/><div><h2>Around your world.</h2><p>Explore places on the map.</p></div></div><MapResults properties={[]} centre={preview} onSelect={()=>{}}/><span className="map-hint"><MapPin size={15}/>Choose a place to explore nearby</span></aside></div>:<><div className="results-search">{searchControls}</div><div className="results-heading"><div>{view==='saved'&&<button className="back-link" onClick={()=>setView('explore')}><ArrowLeft size={16}/>Explore</button>}<h1>{view==='saved'?'Your saved places.':busy&&!result?'Finding your place.':`Near ${result?.area||preferences.area}`}</h1><span className="result-count">{busy&&!result?'':`${displayed.length} places`}{result&&view!=='saved'&&` · ${new Date(result.generated_at||'1970-01-01').toLocaleDateString('en-IN',{day:'numeric',month:'short'})}`}</span></div><div className="view-controls"><select aria-label="Sort places" value={preferences.sort} onChange={e=>setPreferences(f=>({...f,sort:e.target.value}))}><option value="match">Best fit</option><option value="distance">Distance</option><option value="price">Price</option><option value="rating">Rating</option><option value="commute">Travel time</option><option value="safety">Safety evidence %</option></select><button className={`secondary mobile-map-button ${mapVisible?'selected':''}`} onClick={()=>setMapVisible(v=>!v)} aria-expanded={mapVisible}><Map size={18}/>{mapVisible?'Hide map':'Map'}</button></div></div>
+ {result&&preferences.property_types.some(t=>!result.searched_types?.includes(t))&&<p className="field-note">Search to include newly selected types.</p>}
+ <div className={`results-layout ${mapVisible?'map-visible':''}`}><section className="list-column">{busy&&!result?<><Loading label="Finding places nearby"/><div className="property-grid">{[0,1,2,3].map(i=><div className="skeleton-card" key={i}><i/><span/><span/><span/></div>)}</div></>:displayed.length?<div className="property-grid">{displayed.map(p=><PropertyCard key={p.id} property={p} preferences={preferences} saved={saved.some(x=>x.id===p.id)} compared={compare.some(x=>x.id===p.id)} best={p.id===ranked.best_id} focused={focused===p.id} onSave={save} onCompare={toggleCompare} onHover={setHighlighted} onEnrich={enrich} onUpdated={p=>updateProperty(p.id,p)} busySection={loading[p.id]}/>)}</div>:<div className="empty-state"><House size={36}/><h2>{view==='saved'?'Keep your favourites.':'No matching places.'}</h2><p>{view==='saved'?'Tap a heart to save a place.':'Try a wider area or fewer filters.'}</p></div>}</section><aside className="desktop-map"><div className="map-side-heading"><Map size={18}/><strong>Explore the neighbourhood</strong></div>{map}<small className="map-footnote">Zoom in for property names</small></aside></div></>}
+ {error&&<p className="search-error" role="alert">{error}</p>}{result?.mode==='demo'&&<p className="field-note">Example data · fictional places, prices and routes</p>}</main>
+ <footer className="site-footer"><span>SettleWise.</span><small>Saved on this device · no account needed</small></footer>
+ {compare.length>0&&<div className="compare-bar"><span>{compare.length} selected</span><button className="text-button" onClick={()=>setCompare([])}>Clear</button><button className="primary" disabled={compare.length<2} onClick={()=>setPanel('compare')}>Compare<ArrowRight size={17}/></button></div>}
+ {toast&&<div className="toast" role="status"><Check size={17}/>{toast}</div>}{panel==='filters'&&<Preferences value={preferences} onApply={apply} onClose={()=>setPanel(null)}/>}{panel==='compare'&&<Compare properties={compare} preferences={preferences} onClose={()=>setPanel(null)}/>}</>;
 }
-function TrainIcon(){return <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="5" y="3" width="14" height="15" rx="3"/><path d="M5 10h14M8 18l-2 3m10-3 2 3M9 14h.01M15 14h.01M12 3v7"/></svg>}

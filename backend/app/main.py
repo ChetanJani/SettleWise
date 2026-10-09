@@ -4,6 +4,8 @@ import asyncio
 import json
 import re
 import time
+import hashlib
+import os
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,8 +14,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from .config import API_KEY, DATABASE_URL, ROOT
 from .database import Store
 from .models import SearchRequest, RecommendationRequest, DetailRequest, ObservationInput, PropertyInputs
-from .provider import SerpApi, ProviderError, safe_url, stamp
+from .provider import SerpApi, ProviderError, safe_url, stamp,km
 from .ranking import rank
+from .evidence import evidence
 from .demo import demo_properties, demo_commute, demo_overview
 
 def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
@@ -22,7 +25,7 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
     async def lifespan(app):
         try:await asyncio.to_thread(store.initialise)
         except Exception:store.ready=False
-        app.state.provider=provider or SerpApi(api_key)
+        app.state.provider=provider or SerpApi(api_key,cache_path=ROOT/'data'/'search-cache.sqlite3',daily_limit=int(os.getenv('SERPAPI_DAILY_LIMIT','30')))
         yield
         await app.state.provider.close()
         store.engine.dispose()
@@ -43,7 +46,16 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
         return token
 
     async def remember(items):
-        for p in items:app.state.inventory[p['id']]=deepcopy(p)
+        existing={p['id']:app.state.inventory[p['id']] for p in items if p['id'] in app.state.inventory}
+        missing=[p['id'] for p in items if p['id'] not in existing]
+        if missing and store.ready:
+            existing.update({p['id']:p for p in await asyncio.to_thread(store.many,missing)})
+        for p in items:
+            old=existing.get(p['id'])
+            if old:
+                p['_sections']={**old.get('_sections',{}),**p.get('_sections',{})}
+                if len(old.get('images',[]))>len(p.get('images',[])):p['images']=old['images']
+            app.state.inventory[p['id']]=deepcopy(p)
         if len(app.state.inventory)>500:
             for key in list(app.state.inventory)[:100]:app.state.inventory.pop(key,None)
         if store.ready:await asyncio.to_thread(store.put_properties,items)
@@ -66,6 +78,11 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
     def health():
         return {'app':'SettleWise','version':'2.0.0','status':'ok' if store.ready else 'degraded','serpapi_configured':bool(api_key or provider),'database':store.kind,'database_ready':store.ready,'default_mode':'live' if api_key or provider else 'demo'}
 
+    @app.get('/api/usage')
+    def usage():
+        p=app.state.provider
+        return {**(p.disk.stats() if getattr(p,'disk',None) else {'requests_today':getattr(p,'request_count',0),'daily_limit':None}),'cache_hits':getattr(p,'cache_hits',0)}
+
     @app.get('/api/autocomplete')
     async def autocomplete(q:str=Query(min_length=3,max_length=180),city:str=Query(default='Ahmedabad',max_length=80)):
         try:return {'suggestions':await require_provider().autocomplete(q,city)}
@@ -76,9 +93,10 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
         warnings=[];leads=[]
         if body.mode=='demo':
             items=demo_properties(body.area,body.city)
-            centre={'lat':23.040,'lng':72.552,'name':body.area+' (example)'} if body.city.lower()=='ahmedabad' else None
-            if body.property_type=='hotel':items=[];warnings.append('Example mode contains monthly rentals only. Use live search for date-specific hotel results.')
-            for p in items:p['commute']=demo_commute(p,body)
+            centre=body.location.model_dump() if body.location else {'lat':23.040,'lng':72.552,'name':body.area+' (example)'}
+            for i,p in enumerate(items):
+                p['coordinates']={'lat':max(-89,min(89,centre['lat']+.001*(i-2))),'lng':max(-179,min(179,centre['lng']+.002*(i-2)))}
+                p['area_distance_km']=km(centre,p['coordinates']);p['commute']=demo_commute(p,body)
             warnings.append('Example mode: properties, prices, routes and illustrations are fictional. No real availability is implied.')
         else:
             try:
@@ -98,8 +116,10 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
                         items.append(item)
                 except (ValueError,TypeError,KeyError):warnings.append('The local listing file could not be loaded.')
         await remember(items)
-        data=rank(await personal(items,x_client_id),body)
-        return {**data,'candidate_ids':[p['id'] for p in items],'area_location':centre,'listing_leads':leads,'mode':body.mode,'warnings':warnings,'generated_at':stamp(),'area':body.area,'city':body.city}
+        items=await personal(items,x_client_id)
+        for p in items:p['safety_evidence']=evidence(p)
+        data=rank(items,body)
+        return {**data,'candidates':items,'candidate_ids':[p['id'] for p in items],'searched_types':body.property_types or (['flat','pg','hostel','hotel','house'] if body.property_type=='any' else [body.property_type]),'area_location':centre,'listing_leads':leads,'mode':body.mode,'warnings':warnings,'generated_at':stamp(),'area':body.area,'city':body.city}
 
     @app.post('/api/recommendations')
     async def recommendations(body:RecommendationRequest,x_client_id:str|None=Header(default=None)):
@@ -109,34 +129,43 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
                 # Keep example and real places strictly separated even across stored searches.
                 if bool(p.get('is_demo'))!=(body.preferences.mode=='demo'):continue
                 items.append(p)
-        if body.preferences.destination and (body.preferences.priority=='commute' or body.preferences.max_commute or body.preferences.sort=='commute'):
-            # Check six candidates on explicit commute prioritisation, not every visible card.
-            targets=items[:6]
-            async def travel(p):
-                p['commute']=demo_commute(p,body.preferences) if p.get('is_demo') else await require_provider().commute(p,body.preferences)
-            try:
-                async with asyncio.timeout(65):await asyncio.gather(*(travel(p) for p in targets))
-            except TimeoutError:pass
-        elif body.preferences.mode=='demo':
+        if body.preferences.mode=='demo':
             for p in items:p['commute']=demo_commute(p,body.preferences)
-        return {**rank(await personal(items,x_client_id),body.preferences),'route_candidates_checked':min(6,len(items)) if body.preferences.priority=='commute' and body.preferences.destination else 0}
+        return {**rank(await personal(items,x_client_id),body.preferences),'route_candidates_checked':0}
 
     @app.post('/api/properties/{pid}/details')
     async def details(pid:str,body:DetailRequest,x_client_id:str|None=Header(default=None)):
         p=await get_property(pid)
         if not p:raise HTTPException(404,'This place is no longer in the local search cache. Search again.')
         if bool(p.get('is_demo'))!=(body.preferences.mode=='demo'):raise HTTPException(400,'The place and search mode do not match.')
+        context=body.preferences.model_dump(mode='json')
+        if body.section=='commute':keys=('area','location','destination','travel_mode','departure_time','return_time','office_days')
+        elif body.section=='nearby':keys=('household',)
+        else:keys=()
+        section_key=body.section+'-'+hashlib.sha256(json.dumps({k:context.get(k) for k in keys},sort_keys=True).encode()).hexdigest()[:20]
+        cached=(p.get('_sections') or {}).get(section_key)
+        if cached and time.time()-cached.get('saved_at',0)<86400:
+            return {'property':(await personal([p],x_client_id))[0],'section':body.section,**cached['data'],'cached':True}
         if p.get('is_demo'):
-            if body.section=='overview':data=demo_overview(p,body.preferences)
+            if body.section in ('overview','place'):data=demo_overview(p,body.preferences)
+            elif body.section=='commute':data={'commute':demo_commute(p,body.preferences)}
+            elif body.section=='photos':data={'images':p.get('images',[])}
+            elif body.section=='reviews':data={'reviews':[]}
             elif body.section=='nearby':data={'places':[],'warnings':['Nearby services require live search. No fictional businesses are presented.']}
             else:data={'sources':[],'summary':'No real safety reports are asserted in example mode.'}
         else:
             try:
                 async with asyncio.timeout(65):
                     provider=require_provider()
-                    data=await (provider.overview(p,body.preferences) if body.section=='overview' else provider.nearby(p,body.preferences) if body.section=='nearby' else provider.area_evidence(p,body.preferences))
+                    methods={'overview':'place_only','place':'place_only','nearby':'nearby','area':'area_evidence','photos':'photos','reviews':'reviews_only'}
+                    data={'commute':await provider.commute(p,body.preferences)} if body.section=='commute' else await getattr(provider,methods[body.section])(p,body.preferences)
             except TimeoutError:raise HTTPException(504,'Some local information took too long to load. Try again.') from None
             except ProviderError as exc:raise HTTPException(502,str(exc)) from None
+        p.setdefault('_sections',{})[section_key]={'saved_at':time.time(),'data':data}
+        if data.get('images'):p['images']=data['images']
+        if data.get('commute'):p['commute']=data['commute']
+        p['safety_evidence']=evidence(p)
+        await remember([p])
         p=(await personal([p],x_client_id))[0]
         return {'property':p,'section':body.section,**data}
 

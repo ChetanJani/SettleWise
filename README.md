@@ -96,45 +96,38 @@ A configured Neon connection failure stays visible; the app does not secretly sw
 
 Teammates using the same SerpApi key share the same remaining credits. Teammates using the same Neon URL share property/community storage; saved places and rental quotes are separated by browser identifier, not by signed-in accounts.
 
-## How the app was built and how it works
+## How it works
 
-```mermaid
-flowchart LR
-  Browser[React UI in the browser] --> Proxy[Vite /api proxy]
-  Proxy --> API[FastAPI: validation and ranking]
-  API --> Provider[SerpApi: places, reviews, photos, routes]
-  API --> DB[Neon: saves, quotes, community]
-  Browser --> Tiles[OpenStreetMap tiles]
-```
+1. Enter **one location**: office, college, area, station, hotel or another place. Worldwide suggestions include address context and coordinates.
+2. Choose **PG, Hostel, Hotel, Flat, House**, or All types. Optional filters remain available through one Filters button.
+3. FastAPI resolves the point if needed, makes one combined Maps discovery query, and returns candidate snapshots. Maps coverage is a sample, not a complete rental inventory.
+4. React renders source thumbnails and uses `rankLocal` to filter/sort the dataset. Budget, eligibility, BHK, amenities and sorting send **no API requests**.
+5. Cards expand inline. Reviews, photos, nearby services, place facts and routes load only through explicit controls. At most two missing-photo places receive background photo enrichment after a fresh search.
+6. Leaflet/OSM maps appear on the landing page and beside desktop results. Mobile has a Map toggle. At zoom 15+, pins show property names; clicking selects and expands the matching card.
+7. Browser storage restores preferences, results and saved places without automatically searching. Source data can become stale; the result date remains visible.
+8. SQLAlchemy stores source snapshots, quotes and community data in Neon; local SQLite is used only when no database URL is configured. Browser-scoped quotes remain unverified.
 
-1. **React + Vite** builds the interface: search fields, optional preferences, result cards, map, saves, comparison and details. Styles use ivory and deep green and adapt to mobile, tablet and desktop.
-2. **Vite proxies `/api` to FastAPI** on port 8001. The browser never needs the SerpApi key or database URL.
-3. **FastAPI validates search/preferences** with Pydantic. When a worldwide suggestion is selected, the request carries its name, address and coordinates so the search uses the selected place.
-4. **The provider adapter retrieves source data** from SerpApi, normalises fields, strips secret parameters from source links, caches repeated queries and limits concurrent upstream requests to three.
-5. **The ranking module applies known requirements** and compares budget, commute, household space and documented security features. It returns reasons, trade-offs, missing facts and a best fit when enough evidence exists. Unknown facts are not invented.
-6. **SQLAlchemy stores data in Neon**: property snapshots, browser-scoped saves and entered quotes, community observations and deduplicated helpful votes. Tables are created on backend startup.
-7. **The frontend renders the results**. Additional place information loads when a detail section is opened. Leaflet uses OpenStreetMap tiles; there is no separate paid Google Maps key.
+Vite proxies `/api` to FastAPI on port 8001. Provider credentials stay on the backend.
 
-The current version uses a preferred-area field plus an optional work/college destination and a single property-type filter. The proposed single-field/multi-select redesign and persistent credit-saving cache are **not implemented in this commit**.
+## SerpApi request budget
 
-## SerpApi credit use — important for the team
-
-For UI work, select **Example** in the header before typing or searching. Example mode uses fictional properties and routes; it does not call SerpApi. The backend unit tests also use mock provider responses and a temporary local database, so they do not consume live search credits or modify Neon.
-
-Current possible upstream request counts **before cache hits**:
-
-| Action | Requests it can trigger |
+| Action, before cache hits | Provider requests |
 | --- | --- |
-| Type a new prefix and pause | Two autocomplete lookups (nearby + worldwide), sometimes another city lookup |
-| Search monthly accommodation | One Maps accommodation lookup and, for Any/Flat/House, one rental-link Google Search; an area lookup if no suggestion coordinates were selected |
-| Change budget, household, bedrooms or amenities | Local filtering of existing candidates, except when commute prioritisation is also active |
-| Change property type or hotel dates/guests | A new provider search |
-| Prioritise/sort by commute or set a commute limit | Up to two directions per candidate, for up to six candidates |
-| Open place details | Place information, photos, reviews; two directions if a destination is set |
-| Open Around you | Up to seven nearby category searches; eight for a family including schools |
-| Open Area & safety | One local-report Google Search |
+| Uncached autocomplete prefix, 3+ characters and 1.1 second pause | 1 |
+| Search after selecting a suggestion with coordinates | 1 combined discovery query |
+| Search without coordinates | Up to 1 resolution + 1 discovery |
+| Background enrichment of missing photos | At most 2 additional photo requests |
+| Filters, sorting, expanding a card, local saves, map zoom | 0 |
+| Explicit photos, reviews, place facts, nearby services or local reports | Usually 1 per action |
+| Explicit travel there/back | Up to 2 directions requests |
 
-These are possible provider requests, not a claim that every request is billed: repeated queries may hit the app or provider cache. The app cache is **memory-only and clears on backend restart**. Moving every detail onto every card would multiply requests, so do not automatically prefetch all properties while the shared budget is small. Use mocked tests for development and agree as a team before repeated live testing.
+One user search can require several requests; SerpApi does not return all detail endpoints in one response. A combined query saves credits but can underrepresent individual accommodation types. Selecting an uncollected type needs a new search; filters cannot invent its inventory.
+
+`backend/data/search-cache.sqlite3` persists successful provider responses across restarts. Queries normally cache for 24 hours; photos/autocomplete for 7 days. Directions use a shorter provider TTL and detail snapshots can remain cached for 24 hours. Identical in-flight queries share a lock. Browser searches cache for 24 hours; local result snapshots persist until replaced. Detail requests are reused per property/context.
+
+The local daily attempted-request limit defaults to **30**. Set `SERPAPI_DAILY_LIMIT=30` in `backend/.env`; `/api/usage` exposes the local count. This is **not** the SerpApi account billing counter and does not count other teammates or backend instances using the same key. A configured shared daily budget is future deployment work.
+
+Use **Example** or intercepted fixtures for development. Mock backend tests use temporary SQLite and do not spend credits or modify Neon.
 
 ## Working together and getting updates
 
@@ -179,39 +172,30 @@ If you have uncommitted work, commit it on your feature branch before switching.
 | SerpApi credits/rate limit reached | Switch to Example mode for development and check the shared account budget |
 | Price/BHK not provided | This source did not provide those facts; add a provider quote or supply an actual inventory entry |
 
-## User flow
+## Data and limitations
 
-1. Enter the area you want to live in and, optionally, your work/college destination. After three characters, suggestions combine nearby and worldwide places, with address/country context. Selecting a place uses its coordinates; it does not force the original city onto the new location.
-2. View nearby accommodation immediately.
-3. Apply budget, type, household, gender eligibility, commute, amenities, bedroom and priority preferences. Guided personalisation is optional.
-4. Inspect photos, source links, known costs, reviews, two-direction commute estimates, nearby essentials and area evidence.
-5. Save places for the current browser, compare 2–4 places, and contribute clearly labelled community observations.
+Cards show actual source images when available, price/unit, selected-point straight-line distance, rating, known amenities, PG eligibility and safety evidence. Unknown monthly price says **Not available**. Hotels can be discovered without dates; an unknown rate says **Price needs dates**. There is no current automatic dated Google Hotels pricing query and no Airbnb integration.
 
-## Data and honest limitations
+Maps is not a comprehensive rental/vacancy feed. For reliable rent/BHK/details, supply an actual owner inventory (`backend/inventory.example.json`) or enter a private provider quote inside the card. Missing source data remains unknown. Photos are prioritised but cannot be guaranteed when sources provide none; source pictures may differ from the available unit.
 
-**Live mode** uses real provider results. **Example mode** is explicitly fictional and never merged into real searches. Missing prices, room counts and rental terms remain unknown. A map-listed building is not proof of an available rental unit. External rental listing links are shown separately.
+**Safety evidence % is documentation coverage**, not a safety probability: documented boolean answers for CCTV, guard, controlled entry and lighting, divided by four. A documented absent feature also counts as an answer. Without documented facts the percentage is unavailable. Ratings never become women's safety percentages. Local-report links are leads, and community posts/helpful votes are unverified. A validated area crime-risk model needs trustworthy geographic incident data and is outside this prototype.
 
-Maps does not provide a comprehensive rental inventory. Add a provider quote inside the property details panel to personalise comparisons using prices you know. These entered details are private to the browser identifier and marked unverified. Alternatively, supply actual owner listing data in `backend/inventory.json`, using the shape shown in `backend/inventory.example.json`.
+Live and fictional Example data stay distinct. Travel estimates load explicitly; the current adapter uses next-weekday India-time departure/return times. Traffic estimates are not guarantees and worldwide timezone handling is future work.
 
-Price matching excludes known prices above a strict budget. Unknown required facts appear under places needing confirmation. Flexible-budget options retain an explicit trade-off. Preference percentages describe a deterministic comparison among retrieved candidates, not a probability or safety rating. Commute prioritisation checks up to six candidates to bound search usage. Directions are estimates for the next weekday and selected India-time departure/return times; traffic can change.
+Browser storage keeps favourites/preferences/results on the same device without signup. Clearing storage or using another browser loses that identity. The API's browser identifier is not authentication. Public deployment requires protected anonymous sessions or proper identity controls, moderation, shared rate/spend limits and durable cache hosting.
 
-Safety uses sourced leads, review context, building-feature information, community experiences and visit questions. It does not fabricate crime counts or women's safety percentages. Community posts are unverified and should not identify private people or share personal contact details.
-
-No account is required. Saved places and entered quotes use a random browser identifier; clearing browser storage changes that identity. This is intended for local demonstration, not public production access. Public deployment would need proper identity controls, moderation, durable abuse protection and an approved property inventory source.
-
-## SerpApi engines
+## SerpApi engines used by the current flow
 
 | Engine | Purpose |
 | --- | --- |
-| Google Maps Search / Place | Area lookup, accommodation discovery, property/place information, nearby essentials |
-| Google Maps Autocomplete | Location suggestions |
-| Google Maps Directions | Home→destination and destination→home estimates |
-| Google Maps Reviews | Recent review excerpts and transparent keyword topic counts |
-| Google Maps Photos | Place photographs |
-| Google Search | External rental leads and local report/advisory sources |
-| Google Hotels + details | Date-specific hotel prices, images and information |
+| Google Maps Search / Place | Location resolution, discovery, place facts, combined nearby search |
+| Google Maps Autocomplete | Worldwide location suggestions |
+| Google Maps Photos | Actual place photographs |
+| Google Maps Reviews | Recent source excerpts |
+| Google Maps Directions | Explicit there/back estimates |
+| Google Search | Local reports/advisory leads |
 
-No Airbnb integration. Provider queries are cached in memory with bounded concurrency. Nearby services and area searches load when their tabs are opened. Cache resets on restart. Map tiles are OpenStreetMap with attribution and no bulk prefetch.
+One SerpApi key covers these engines subject to account availability and limits. Leaflet uses attributed OpenStreetMap tiles, not a separate paid Google Maps key. Provider results are bounded; not all categories or requested fields will be present.
 
 ## Project structure
 
@@ -233,6 +217,9 @@ cd backend
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 cd ..\frontend
 npm.cmd run build
+npm.cmd test
 ```
 
-The implementation has passed 27 backend tests and a production frontend build. Browser checks exercised cards, filters, saves, comparison, details, Escape/back dismissal and layouts at 320, 375, 768 and 1440 pixels. Live checks connected to Neon and returned real places, images, reviews and both commute directions. Worldwide autocomplete checks returned Navrangpura, Navsari and locations in Spain for “nav”, plus Paris, Paraguay and Parma for “par”. Suggestions reflect provider coverage and relevance, not a complete list of every place. Provider results and available credits may change.
+The redesigned backend passed **35 mocked tests**, including one-request discovery/autocomplete, concurrent deduplication, persistent cache reuse, quota enforcement, no-provider filtering, private quotes and conservative eligibility parsing. Six browser-ranking unit tests and the frontend production build passed. Browser fixture checks verified one location/Filters control, worldwide suggestions, names on zoomed map pins, inline details, zero-request filtering, reload persistence, source image rendering and a 390px layout without horizontal overflow. These checks use no live SerpApi credits. They do not establish complete live inventory coverage.
+
+See **SettleWise-Project-Brief.txt** for the shareable plain-text overview and **PRD.md** for requirements and deployment gaps.
