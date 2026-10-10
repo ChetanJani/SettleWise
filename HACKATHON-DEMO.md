@@ -1,6 +1,6 @@
 # SettleWise demo
 
-Start the services and open http://127.0.0.1:5174. Click **Try demo** in the header. It resets filters and shows the Navrangpura scenario with **50 fictional stays: 10 PGs, 10 hostels, 10 hotels, 10 flats and 10 houses**. **Live search** exits the demo. No automatic fallback silently substitutes examples for real search results.
+Start the services and open http://127.0.0.1:5174. Click **Example stays** in the header. It resets filters and shows the Navrangpura scenario with **50 fictional stays: 10 PGs, 10 hostels, 10 hotels, 10 flats and 10 houses**. **Live search** exits the demo. No automatic fallback silently substitutes examples for real search results.
 
 The demo uses stored stock photographs to illustrate the fictional stays. Prices, reviews, nearby businesses, eligibility, building features, map positions and travel estimates are demonstration scenarios, not verified listings. Keep the visible Demo/Example labels during the presentation.
 
@@ -17,7 +17,7 @@ The demo uses stored stock photographs to illustrate the fictional stays. Prices
 
 ## What works without paid APIs
 
-Demo search, all detail sections, simulated routes, filters, sorting, comparison, favourites, photo galleries and example community interactions. Provider usage does not increase. Demo properties remain in backend memory; the browser retains the search snapshot. Restarting the backend may require clicking Try demo again before loading an uncached detail section. Map background tiles use OpenStreetMap and still need a network connection; local cards and photographs do not need image hosting.
+Demo search, all detail sections, simulated routes, filters, sorting, comparison, favourites, photo galleries and example community interactions. Provider usage does not increase. Demo properties remain in backend memory; the browser retains the search snapshot. Restarting the backend may require clicking Example stays again before loading an uncached detail section. Map background tiles use OpenStreetMap and still need a network connection; local cards and photographs do not need image hosting.
 
 The default demo includes varied budgets, male/female/mixed eligibility, studio through four-bedroom homes, single/shared rooms, different security features, both positive and negative safety scenarios, monthly deposits and separate nightly hotel pricing. Filters can naturally reduce a category below ten.
 

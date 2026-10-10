@@ -31,7 +31,7 @@ The shared file should contain `SERPAPI_API_KEY` and `DATABASE_URL`; see the pla
 Copy-Item backend\.env.example backend\.env
 ```
 
-Leave those values empty for local SQLite; live search requires a valid SerpApi key. The explicit Try demo button opens the fictional presentation scenario. It does not consume provider credits or automatically replace a failed live search. Do not overwrite an environment file you have already received. `.env` is intentionally ignored by Git, so each friend must add it separately.
+Leave those values empty for local SQLite; live search requires a valid SerpApi key. The explicit Example stays button opens the fictional presentation scenario. It does not consume provider credits or automatically replace a failed live search. Do not overwrite an environment file you have already received. `.env` is intentionally ignored by Git, so each friend must add it separately.
 
 ### 3. Install and start
 
@@ -131,7 +131,7 @@ One user search can require several requests; SerpApi does not return all detail
 
 The local daily attempted-request limit defaults to **30**. Set `SERPAPI_DAILY_LIMIT=30` in `backend/.env`; `/api/usage` exposes the local count. This is **not** the SerpApi account billing counter and does not count other teammates or backend instances using the same key. A configured shared daily budget is future deployment work.
 
-Use Try demo, intercepted fixtures or the backend demo endpoint for development. Mock backend tests use temporary SQLite and do not spend credits or modify Neon.
+Use Example stays, intercepted fixtures or the backend demo endpoint for development. Mock backend tests use temporary SQLite and do not spend credits or modify Neon.
 
 ## Working together and getting updates
 
@@ -186,7 +186,7 @@ Maps is not a comprehensive rental/vacancy feed. For reliable rent/BHK/details, 
 
 **Security evidence % is documentation coverage**: documented boolean answers for CCTV, guard, controlled entry and lighting, divided by four. A documented absent feature also counts as an answer. Without documented facts the percentage is unavailable. Ratings never become women's safety percentages. Local-report links are leads, and community posts/helpful votes are unverified. A validated area crime-risk model needs trustworthy geographic incident data and is outside this prototype.
 
-Live and fictional Example data stay distinct. The header’s Try demo button opens 50 fictional stays, ten per type; Live search exits. Local stock scenes, simulated routes and populated detail popups need no provider calls. Example community posts/votes stay in browser storage. See [HACKATHON-DEMO.md](HACKATHON-DEMO.md) for the presentation flow. Travel estimates load explicitly; the current adapter uses next-weekday India-time departure/return times. Traffic estimates are not guarantees and worldwide timezone handling is future work.
+Live and fictional Example data stay distinct. The header’s Example stays button opens 50 fictional stays, ten per type; Live search exits. Local stock scenes, simulated routes and populated detail popups need no provider calls. Example community posts/votes stay in browser storage. See [HACKATHON-DEMO.md](HACKATHON-DEMO.md) for the presentation flow. Travel estimates load explicitly; the current adapter uses next-weekday India-time departure/return times. Traffic estimates are not guarantees and worldwide timezone handling is future work.
 
 Browser storage keeps favourites/preferences/results on the same device without signup. Clearing storage or using another browser loses that identity. The API's browser identifier is not authentication. Public deployment requires protected anonymous sessions or proper identity controls, moderation, shared rate/spend limits and durable cache hosting.
 

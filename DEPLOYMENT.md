@@ -73,7 +73,7 @@ Netlify continuous deployment has been connected to the deployment repository.
 ## Verify
 
 - Render `/api/health`: HTTP 200; `database_ready` and `serpapi_configured` true.
-- Netlify home loads, local demo photos load, Try demo shows all five stay types.
+- Netlify home loads, local demo photos load, Example stays shows all five stay types.
 - Demo filtering, safety details and browser favourites work without SerpApi use.
 - CORS permits Netlify and rejects unrelated origins.
 - Live search remains separate from explicitly labelled fictional examples.
