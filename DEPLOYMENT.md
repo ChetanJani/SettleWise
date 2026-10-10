@@ -3,6 +3,12 @@
 Frontend: Netlify, project name `settlewisehca`.
 Backend: Render Python web service. The source repository stays private.
 
+- Live site: https://settlewisehca.netlify.app
+- Backend API docs: https://settlewisehca-api.onrender.com/docs
+- Backend health: https://settlewisehca-api.onrender.com/api/health
+- Main source: https://github.com/ChetanJani/SettleWise
+- Private Render deployment source: https://github.com/Angiras833/SettleWise-HCA
+
 ## Render
 
 The root `render.yaml` documents the web service settings:
@@ -39,7 +45,7 @@ The root `netlify.toml` builds `frontend` and publishes `dist` with an SPA fallb
 Set only the **public** backend origin as a Netlify build variable:
 
 ```dotenv
-VITE_API_BASE_URL=https://YOUR_RENDER_SERVICE.onrender.com
+VITE_API_BASE_URL=https://settlewisehca-api.onrender.com
 ```
 
 Do not put SerpApi keys or database credentials in `VITE_` variables. Frontend API
@@ -55,10 +61,10 @@ Git-connected Render redeploys that copy automatically. For a manual Netlify dep
 
 ```powershell
 cd frontend
-$env:VITE_API_BASE_URL='https://YOUR_RENDER_SERVICE.onrender.com'
+$env:VITE_API_BASE_URL='https://settlewisehca-api.onrender.com'
 npm.cmd ci
 npm.cmd run build
-npx netlify-cli deploy --prod --dir dist --site YOUR_NETLIFY_SITE_ID --no-build
+npx netlify-cli deploy --prod --dir dist --site a6ee9361-3588-4f80-887e-f04133884fab --no-build
 ```
 
 The latest manual frontend deploy must be repeated after frontend changes unless

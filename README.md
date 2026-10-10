@@ -4,6 +4,8 @@ A React/Vite + FastAPI app for finding accommodation near a preferred area and c
 
 Hosting setup and update commands: [DEPLOYMENT.md](DEPLOYMENT.md). Hackathon walkthrough: [HACKATHON-DEMO.md](HACKATHON-DEMO.md).
 
+**Live:** [SettleWise HCA](https://settlewisehca.netlify.app) · [Backend API](https://settlewisehca-api.onrender.com/docs). The free Render backend may need time to wake after inactivity.
+
 ## Teammate setup — start here
 
 You need **Git**, **Python 3.12** (tested with 3.12.10), and **Node.js 22.12+ or 24** with npm (tested with Node 24.16.0). Vite also supports Node 20.19+, but use the recommended versions for consistency. Accept the GitHub collaborator invitation before cloning this private repository.
