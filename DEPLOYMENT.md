@@ -26,7 +26,7 @@ Set these in Render's environment settings; never commit their secret values:
 ```dotenv
 SERPAPI_API_KEY=your_existing_key
 DATABASE_URL=your_existing_neon_postgres_url
-SERPAPI_DAILY_LIMIT=100
+SERPAPI_DAILY_LIMIT=500
 CORS_ORIGINS=https://settlewisehca.netlify.app
 PYTHON_VERSION=3.12.8
 ```

@@ -15,7 +15,7 @@ services:
       - key: CORS_ORIGINS
         value: https://settlewisehca.netlify.app
       - key: SERPAPI_DAILY_LIMIT
-        value: "100"
+        value: "500"
       - key: SERPAPI_API_KEY
         sync: false
       - key: DATABASE_URL
