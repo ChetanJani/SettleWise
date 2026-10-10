@@ -12,8 +12,12 @@ from app.ranking import rank
 from app.provider import SerpApi, base_property, safe_url
 
 class FakeProvider:
+    def __init__(self):self.discover_calls=0
     async def close(self): pass
+    async def autocomplete(self,q,city='Worldwide'):
+        return [{'text':'Navrangpura','address':'Ahmedabad, India','coordinates':None}]
     async def discover(self, body):
+        self.discover_calls+=1
         p=base_property({'title':'Example PG','place_id':'test','gps_coordinates':{'latitude':23.03,'longitude':72.55}},body.area,body.city)
         return {'lat':23.03,'lng':72.55},[p],[]
     async def overview(self,p,b): return {'images':[],'reviews':[],'commute':None}
@@ -60,8 +64,17 @@ class ApiTests(unittest.TestCase):
     def search(self,mode='demo'):
         response=self.client.post('/api/search',json={'area':'Navrangpura','mode':mode},headers=self.headers);self.assertEqual(response.status_code,200);return response.json()
     def test_health(self):self.assertTrue(self.client.get('/api/health').json()['database_ready'])
+    def test_two_character_location_suggestions(self):
+        response=self.client.get('/api/autocomplete?q=na&city=Worldwide')
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json()['suggestions'][0]['text'],'Navrangpura')
+        self.assertEqual(self.client.get('/api/autocomplete?q=n').status_code,422)
+    def test_invalid_browser_id_is_rejected_before_provider_search(self):
+        response=self.client.post('/api/search',json={'area':'Navrangpura','mode':'live'},headers={'X-Client-Id':'"test-browser-one"'})
+        self.assertEqual(response.status_code,400)
+        self.assertEqual(self.app.state.provider.discover_calls,0)
     def test_saved_is_private_and_idempotent(self):
-        p=self.search()['properties'][0];url='/api/saved/'+p['id']
+        p=self.search('live')['properties'][0];url='/api/saved/'+p['id']
         for _ in range(2):self.assertEqual(self.client.post(url,headers=self.headers).status_code,200)
         self.assertEqual(len(self.client.get('/api/saved',headers=self.headers).json()['properties']),1)
         self.assertEqual(self.client.get('/api/saved',headers={'X-Client-Id':'test-browser-two'}).json()['properties'],[])
@@ -102,7 +115,7 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         async def search(engine,**params):queries.append(params);return {}
         provider.resolve=resolve;provider.search=search
         body=SearchRequest(area='Navsari',city='Ahmedabad',location={'name':'Navsari','address':'Gujarat, India','lat':20.95,'lng':72.93})
-        centre,items,leads=await provider.discover(body)
+        centre,items,leads,report=await provider.discover(body)
         self.assertEqual(centre['lat'],20.95);self.assertNotIn('Ahmedabad',queries[0]['q']);self.assertIn('@20.95,72.93',queries[0]['ll']);await provider.close()
 
     async def test_worldwide_queries_do_not_append_worldwide(self):

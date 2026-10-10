@@ -2,6 +2,8 @@
 
 A React/Vite + FastAPI app for finding accommodation near a preferred area and comparing it against personal priorities. Ivory, deep green, responsive desktop/tablet/mobile design. No login or signup.
 
+Hosting setup and update commands: [DEPLOYMENT.md](DEPLOYMENT.md). Hackathon walkthrough: [HACKATHON-DEMO.md](HACKATHON-DEMO.md).
+
 ## Teammate setup — start here
 
 You need **Git**, **Python 3.12** (tested with 3.12.10), and **Node.js 22.12+ or 24** with npm (tested with Node 24.16.0). Vite also supports Node 20.19+, but use the recommended versions for consistency. Accept the GitHub collaborator invitation before cloning this private repository.
@@ -27,7 +29,7 @@ The shared file should contain `SERPAPI_API_KEY` and `DATABASE_URL`; see the pla
 Copy-Item backend\.env.example backend\.env
 ```
 
-Leave those example values empty to use fictional Example mode and local SQLite. Do not overwrite an environment file you have already received. `.env` is intentionally ignored by Git, so each friend must add it separately.
+Leave those values empty for local SQLite; live search requires a valid SerpApi key. The explicit Try demo button opens the fictional presentation scenario. It does not consume provider credits or automatically replace a failed live search. Do not overwrite an environment file you have already received. `.env` is intentionally ignored by Git, so each friend must add it separately.
 
 ### 3. Install and start
 
@@ -100,9 +102,9 @@ Teammates using the same SerpApi key share the same remaining credits. Teammates
 
 1. Enter **one location**: office, college, area, station, hotel or another place. Worldwide suggestions include address context and coordinates.
 2. Choose **PG, Hostel, Hotel, Flat, House**, or All types. Optional filters remain available through one Filters button.
-3. FastAPI resolves the point if needed, makes one combined Maps discovery query, and returns candidate snapshots. Maps coverage is a sample, not a complete rental inventory.
+3. FastAPI resolves the point if needed, queries all five accommodation types, even when only one is selected, and returns cached candidate snapshots within 10 km by default, sorted nearest first. It targets 10 per type, reuses farther results already returned, and expands sparse categories with a broader Maps query and bounded pagination. Maps coverage is a sample, not a complete rental inventory.
 4. React renders source thumbnails and uses `rankLocal` to filter/sort the dataset. Budget, eligibility, BHK, amenities and sorting send **no API requests**.
-5. Cards expand inline. Reviews, photos, nearby services, place facts and routes load only through explicit controls. At most two missing-photo places receive background photo enrichment after a fresh search.
+5. Details open in a popup. A separate small Local experiences button opens community observations in its own popup. Reviews, photos, nearby services, place facts and routes are cached; opening Safety loads sampled reviews on demand. At most two missing-photo places receive background photo enrichment after a fresh search.
 6. Leaflet/OSM maps appear on the landing page and beside desktop results. Mobile has a Map toggle. At zoom 15+, pins show property names; clicking selects and expands the matching card.
 7. Browser storage restores preferences, results and saved places without automatically searching. Source data can become stale; the result date remains visible.
 8. SQLAlchemy stores source snapshots, quotes and community data in Neon; local SQLite is used only when no database URL is configured. Browser-scoped quotes remain unverified.
@@ -113,21 +115,21 @@ Vite proxies `/api` to FastAPI on port 8001. Provider credentials stay on the ba
 
 | Action, before cache hits | Provider requests |
 | --- | --- |
-| Uncached autocomplete prefix, 3+ characters and 1.1 second pause | 1 |
-| Search after selecting a suggestion with coordinates | 1 combined discovery query |
-| Search without coordinates | Up to 1 resolution + 1 discovery |
+| Uncached autocomplete prefix, 2+ characters and 350 ms pause | 1 |
+| Search after selecting a suggestion with coordinates | 5 category queries; sparse types can add pagination and one broader query (maximum 4 requests/type) |
+| Search without coordinates | Up to 1 resolution + the category queries above |
 | Background enrichment of missing photos | At most 2 additional photo requests |
-| Filters, sorting, expanding a card, local saves, map zoom | 0 |
+| Filters, sorting, opening Details/Local experiences, local saves, map zoom | 0 |
 | Explicit photos, reviews, place facts, nearby services or local reports | Usually 1 per action |
 | Explicit travel there/back | Up to 2 directions requests |
 
-One user search can require several requests; SerpApi does not return all detail endpoints in one response. A combined query saves credits but can underrepresent individual accommodation types. Selecting an uncollected type needs a new search; filters cannot invent its inventory.
+One user search can require several requests; SerpApi does not return all detail endpoints in one response. All five types are collected in the same discovery batch and cached. Changing type selections does not start a search. Real coverage varies: the 10-per-type target cannot be guaranteed where the source returns fewer places. Shared PG/hostel listings appear once in All types. The UI omits collection counts. A tighter distance or budget filter can reduce the displayed set below the collection target.
 
 `backend/data/search-cache.sqlite3` persists successful provider responses across restarts. Queries normally cache for 24 hours; photos/autocomplete for 7 days. Directions use a shorter provider TTL and detail snapshots can remain cached for 24 hours. Identical in-flight queries share a lock. Browser searches cache for 24 hours; local result snapshots persist until replaced. Detail requests are reused per property/context.
 
 The local daily attempted-request limit defaults to **30**. Set `SERPAPI_DAILY_LIMIT=30` in `backend/.env`; `/api/usage` exposes the local count. This is **not** the SerpApi account billing counter and does not count other teammates or backend instances using the same key. A configured shared daily budget is future deployment work.
 
-Use **Example** or intercepted fixtures for development. Mock backend tests use temporary SQLite and do not spend credits or modify Neon.
+Use Try demo, intercepted fixtures or the backend demo endpoint for development. Mock backend tests use temporary SQLite and do not spend credits or modify Neon.
 
 ## Working together and getting updates
 
@@ -169,7 +171,7 @@ If you have uncommitted work, commit it on your feature branch before switching.
 | Backend unavailable | Check `.local/backend-error.log`; for the automatic start script, run stop and start again |
 | Live search needs a key | Confirm the received file is exactly `backend/.env`, then restart the backend |
 | Database storage unavailable | Check the Neon URL/SSL parameters and database/network availability; a configured Neon failure does not switch to SQLite |
-| SerpApi credits/rate limit reached | Switch to Example mode for development and check the shared account budget |
+| SerpApi credits/rate limit reached | Use mocked fixtures for development and check the shared account budget |
 | Price/BHK not provided | This source did not provide those facts; add a provider quote or supply an actual inventory entry |
 
 ## Data and limitations
@@ -178,9 +180,11 @@ Cards show actual source images when available, price/unit, selected-point strai
 
 Maps is not a comprehensive rental/vacancy feed. For reliable rent/BHK/details, supply an actual owner inventory (`backend/inventory.example.json`) or enter a private provider quote inside the card. Missing source data remains unknown. Photos are prioritised but cannot be guaranteed when sources provide none; source pictures may differ from the available unit.
 
-**Safety evidence % is documentation coverage**, not a safety probability: documented boolean answers for CCTV, guard, controlled entry and lighting, divided by four. A documented absent feature also counts as an answer. Without documented facts the percentage is unavailable. Ratings never become women's safety percentages. Local-report links are leads, and community posts/helpful votes are unverified. A validated area crime-risk model needs trustworthy geographic incident data and is outside this prototype.
+**Review safety sentiment %** uses positive / classified safety-related English review texts, with at least three classified reviews. The Safety popup explains the positive, negative and mixed counts. Cards omit sample-shortfall text. Overall ratings can appear as a separate Review score fallback; ratings are never renamed as safety. Unknown stays unknown; star ratings are excluded. This is sample sentiment, not a personal safety probability. Google News links provide dated context and do not change the percentage.
 
-Live and fictional Example data stay distinct. Travel estimates load explicitly; the current adapter uses next-weekday India-time departure/return times. Traffic estimates are not guarantees and worldwide timezone handling is future work.
+**Security evidence % is documentation coverage**: documented boolean answers for CCTV, guard, controlled entry and lighting, divided by four. A documented absent feature also counts as an answer. Without documented facts the percentage is unavailable. Ratings never become women's safety percentages. Local-report links are leads, and community posts/helpful votes are unverified. A validated area crime-risk model needs trustworthy geographic incident data and is outside this prototype.
+
+Live and fictional Example data stay distinct. The header’s Try demo button opens 50 fictional stays, ten per type; Live search exits. Local stock scenes, simulated routes and populated detail popups need no provider calls. Example community posts/votes stay in browser storage. See [HACKATHON-DEMO.md](HACKATHON-DEMO.md) for the presentation flow. Travel estimates load explicitly; the current adapter uses next-weekday India-time departure/return times. Traffic estimates are not guarantees and worldwide timezone handling is future work.
 
 Browser storage keeps favourites/preferences/results on the same device without signup. Clearing storage or using another browser loses that identity. The API's browser identifier is not authentication. Public deployment requires protected anonymous sessions or proper identity controls, moderation, shared rate/spend limits and durable cache hosting.
 
@@ -193,7 +197,7 @@ Browser storage keeps favourites/preferences/results on the same device without 
 | Google Maps Photos | Actual place photographs |
 | Google Maps Reviews | Recent source excerpts |
 | Google Maps Directions | Explicit there/back estimates |
-| Google Search | Local reports/advisory leads |
+| Google News | Dated, sourced local safety/news leads in the Safety popup |
 
 One SerpApi key covers these engines subject to account availability and limits. Leaflet uses attributed OpenStreetMap tiles, not a separate paid Google Maps key. Provider results are bounded; not all categories or requested fields will be present.
 

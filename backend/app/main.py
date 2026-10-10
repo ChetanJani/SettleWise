@@ -17,7 +17,7 @@ from .models import SearchRequest, RecommendationRequest, DetailRequest, Observa
 from .provider import SerpApi, ProviderError, safe_url, stamp,km
 from .ranking import rank
 from .evidence import evidence
-from .demo import demo_properties, demo_commute, demo_overview
+from .demo import demo_properties, demo_commute, demo_details, position_demo
 
 def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
     store=Store(database_url)
@@ -31,7 +31,8 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
         store.engine.dispose()
 
     app=FastAPI(title='SettleWise',version='2.0.0',lifespan=lifespan)
-    app.add_middleware(CORSMiddleware,allow_origins=['http://127.0.0.1:5174','http://localhost:5174'],allow_methods=['GET','POST','DELETE'],allow_headers=['Content-Type','X-Client-Id'])
+    origins=[value.strip().rstrip('/') for value in os.getenv('CORS_ORIGINS','http://127.0.0.1:5174,http://localhost:5174').split(',') if value.strip()]
+    app.add_middleware(CORSMiddleware,allow_origins=origins,allow_methods=['GET','POST','DELETE'],allow_headers=['Content-Type','X-Client-Id'])
     app.state.store=store;app.state.inventory={};app.state.rates={}
 
     def require_database():
@@ -47,7 +48,7 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
 
     async def remember(items):
         existing={p['id']:app.state.inventory[p['id']] for p in items if p['id'] in app.state.inventory}
-        missing=[p['id'] for p in items if p['id'] not in existing]
+        missing=[p['id'] for p in items if p['id'] not in existing and not p.get('is_demo')]
         if missing and store.ready:
             existing.update({p['id']:p for p in await asyncio.to_thread(store.many,missing)})
         for p in items:
@@ -58,7 +59,8 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
             app.state.inventory[p['id']]=deepcopy(p)
         if len(app.state.inventory)>500:
             for key in list(app.state.inventory)[:100]:app.state.inventory.pop(key,None)
-        if store.ready:await asyncio.to_thread(store.put_properties,items)
+        live_items=[p for p in items if not p.get('is_demo')]
+        if store.ready and live_items:await asyncio.to_thread(store.put_properties,live_items)
 
     async def get_property(pid):
         p=app.state.inventory.get(pid)
@@ -67,6 +69,7 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
         return None
 
     async def personal(items, token):
+        if items and all(p.get('is_demo') for p in items):return items
         return await asyncio.to_thread(store.inputs,identity(token),items) if token and store.ready else items
 
     @app.exception_handler(SQLAlchemyError)
@@ -84,23 +87,28 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
         return {**(p.disk.stats() if getattr(p,'disk',None) else {'requests_today':getattr(p,'request_count',0),'daily_limit':None}),'cache_hits':getattr(p,'cache_hits',0)}
 
     @app.get('/api/autocomplete')
-    async def autocomplete(q:str=Query(min_length=3,max_length=180),city:str=Query(default='Ahmedabad',max_length=80)):
+    async def autocomplete(q:str=Query(min_length=2,max_length=180),city:str=Query(default='Worldwide',max_length=80)):
         try:return {'suggestions':await require_provider().autocomplete(q,city)}
         except ProviderError as exc:raise HTTPException(502,str(exc)) from None
 
     @app.post('/api/search')
     async def search(body:SearchRequest,x_client_id:str|None=Header(default=None)):
-        warnings=[];leads=[]
+        # Reject malformed browser identifiers before consuming provider credits.
+        if x_client_id:identity(x_client_id)
+        warnings=[];leads=[];discovery=None
         if body.mode=='demo':
             items=demo_properties(body.area,body.city)
             centre=body.location.model_dump() if body.location else {'lat':23.040,'lng':72.552,'name':body.area+' (example)'}
-            for i,p in enumerate(items):
-                p['coordinates']={'lat':max(-89,min(89,centre['lat']+.001*(i-2))),'lng':max(-179,min(179,centre['lng']+.002*(i-2)))}
-                p['area_distance_km']=km(centre,p['coordinates']);p['commute']=demo_commute(p,body)
+            for p in items:
+                position_demo(p,centre);p['commute']=demo_commute(p,body)
+            discovery={'policy':'nearest-v1','radius_km':10,'target_per_type':10,'types':[{'type':t,'count':10,'target':10,'status':'ready'} for t in ('pg','hostel','hotel','flat','house')],'unique_count':50,'complete':True,'provider_incomplete':False}
             warnings.append('Example mode: properties, prices, routes and illustrations are fictional. No real availability is implied.')
         else:
             try:
-                async with asyncio.timeout(65):centre,items,leads=await require_provider().discover(body)
+                async with asyncio.timeout(65):
+                    batch=await require_provider().discover(body)
+                    centre,items,leads=batch[:3]
+                    discovery=batch[3] if len(batch)>3 else None
             except ProviderError as exc:raise HTTPException(502,str(exc)) from None
             except TimeoutError:raise HTTPException(504,'Finding places took too long. Try a smaller area.') from None
             # Explicit local inventory augments discovery; there is no invented rental feed.
@@ -119,7 +127,7 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
         items=await personal(items,x_client_id)
         for p in items:p['safety_evidence']=evidence(p)
         data=rank(items,body)
-        return {**data,'candidates':items,'candidate_ids':[p['id'] for p in items],'searched_types':body.property_types or (['flat','pg','hostel','hotel','house'] if body.property_type=='any' else [body.property_type]),'area_location':centre,'listing_leads':leads,'mode':body.mode,'warnings':warnings,'generated_at':stamp(),'area':body.area,'city':body.city}
+        return {**data,'candidates':items,'candidate_ids':[p['id'] for p in items],'discovery':discovery,'searched_types':['pg','hostel','hotel','flat','house'],'area_location':centre,'listing_leads':leads,'mode':body.mode,'warnings':warnings,'generated_at':stamp(),'area':body.area,'city':body.city}
 
     @app.post('/api/recommendations')
     async def recommendations(body:RecommendationRequest,x_client_id:str|None=Header(default=None)):
@@ -141,18 +149,14 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
         context=body.preferences.model_dump(mode='json')
         if body.section=='commute':keys=('area','location','destination','travel_mode','departure_time','return_time','office_days')
         elif body.section=='nearby':keys=('household',)
+        elif body.section=='area':keys=('area','location','city')
         else:keys=()
-        section_key=body.section+'-'+hashlib.sha256(json.dumps({k:context.get(k) for k in keys},sort_keys=True).encode()).hexdigest()[:20]
+        section_key=(body.section+'-v2' if body.section in ('reviews','area') else body.section)+'-'+hashlib.sha256(json.dumps({k:context.get(k) for k in keys},sort_keys=True).encode()).hexdigest()[:20]
         cached=(p.get('_sections') or {}).get(section_key)
         if cached and time.time()-cached.get('saved_at',0)<86400:
             return {'property':(await personal([p],x_client_id))[0],'section':body.section,**cached['data'],'cached':True}
         if p.get('is_demo'):
-            if body.section in ('overview','place'):data=demo_overview(p,body.preferences)
-            elif body.section=='commute':data={'commute':demo_commute(p,body.preferences)}
-            elif body.section=='photos':data={'images':p.get('images',[])}
-            elif body.section=='reviews':data={'reviews':[]}
-            elif body.section=='nearby':data={'places':[],'warnings':['Nearby services require live search. No fictional businesses are presented.']}
-            else:data={'sources':[],'summary':'No real safety reports are asserted in example mode.'}
+            data=demo_details(p,body.preferences,body.section)
         else:
             try:
                 async with asyncio.timeout(65):
@@ -162,6 +166,7 @@ def create_app(database_url=DATABASE_URL, api_key=API_KEY, provider=None):
             except TimeoutError:raise HTTPException(504,'Some local information took too long to load. Try again.') from None
             except ProviderError as exc:raise HTTPException(502,str(exc)) from None
         p.setdefault('_sections',{})[section_key]={'saved_at':time.time(),'data':data}
+        if data.get('review_safety'):p['review_safety']=data['review_safety']
         if data.get('images'):p['images']=data['images']
         if data.get('commute'):p['commute']=data['commute']
         p['safety_evidence']=evidence(p)

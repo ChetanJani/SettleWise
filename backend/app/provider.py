@@ -9,6 +9,7 @@ import math
 import re
 import time
 from .cache import SearchCache
+from .evidence import review_safety
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 import httpx
 
@@ -159,19 +160,60 @@ class SerpApi:
     async def discover(self,body):
         centre=body.location.model_dump() if body.location else await self.resolve(body.area,body.city)
         if not centre:raise ProviderError('Choose a more specific place or include its city.')
-        context=f'{body.location.name}, {body.location.address}'.strip(', ') if body.location else body.area if body.city=='Worldwide' else f'{body.area}, {body.city}'
-        types=body.property_types or (['flat','pg','hostel','hotel','house'] if body.property_type=='any' else [body.property_type])
-        terms={'pg':'paying guest PG','hostel':'hostels','hotel':'hotels','flat':'apartments flats','house':'rental houses villas'}
-        # One combined discovery query returns the selected accommodation types.
-        payload=await self.search('google_maps',q=' '.join(terms[t] for t in types)+' near '+context,type='search',ll=f"@{centre['lat']},{centre['lng']},14z")
-        items=[];seen=set()
-        for row in rows(payload):
-            item=base_property(row,body.area,body.city);point=item['coordinates']
-            if not point or km(centre,point)>12 or item['id'] in seen:continue
-            if item['type'] not in types and item['type']!='other':continue
-            seen.add(item['id']);item['area_distance_km']=km(centre,point)
-            items.append(item)
-        return centre,items[:40],[]
+        context=f"{centre.get('name') or body.area}, {centre.get('address') or ''}".strip(', ')
+        types=['pg','hostel','hotel','flat','house']
+        terms={'pg':'paying guest PG accommodation','hostel':'hostels','hotel':'hotels','flat':'residential apartments flats','house':'rental houses villas'}
+        radius=max(10,body.radius_km or 10)
+        async def category(kind):
+            try:
+                payload=await self.search('google_maps',q=terms[kind]+' near '+context,type='search',ll=f"@{centre['lat']},{centre['lng']},15z")
+            except ProviderError as exc:return kind,[],str(exc)
+            found=[];seen=set();warning=None
+            def collect(page):
+                for row in rows(page):
+                    item=base_property(row,body.area,body.city);point=item['coordinates']
+                    if not point or km(centre,point)>radius or item['id'] in seen:continue
+                    text=' '.join(str(row.get(k) or '') for k in ('title','type')).lower()
+                    if kind in ('flat','house') and re.search(r'\b(?:estate agency|estate agent|broker|property dealer)\b',text):continue
+                    explicit={
+                        'pg':bool(re.search(r'\b(?:pg|paying guest)\b',text)),
+                        'hostel':'hostel' in text,
+                        'hotel':bool(re.search(r'\b(?:hotel|resort|motel|inn)\b',text)),
+                        'flat':any(word in text for word in ('apartment','flat','residen','housing')),
+                        'house':any(word in text for word in ('villa','bungalow','rental house','rent house','homestay')),
+                    }
+                    if not explicit[kind] and item['type']!=kind:continue
+                    item['discovery_types']=[kind];item['area_distance_km']=km(centre,point)
+                    item['discovery_note']='Map-listed place; available accommodation needs confirmation.'
+                    seen.add(item['id']);found.append(item)
+            collect(payload)
+            # Keep farther results from the same page before spending another request.
+            if len(found)<10 and (payload.get('serpapi_pagination') or {}).get('next'):
+                try:collect(await self.search('google_maps',q=terms[kind]+' near '+context,type='search',ll=f"@{centre['lat']},{centre['lng']},15z",start=20))
+                except ProviderError as exc:warning='Additional results unavailable: '+str(exc)
+            # Sparse types get one broader map search, still bounded to the selected point.
+            if len(found)<10:
+                try:
+                    wider=await self.search('google_maps',q=terms[kind]+' near '+context,type='search',ll=f"@{centre['lat']},{centre['lng']},13z")
+                    collect(wider)
+                    if len(found)<10 and (wider.get('serpapi_pagination') or {}).get('next'):
+                        collect(await self.search('google_maps',q=terms[kind]+' near '+context,type='search',ll=f"@{centre['lat']},{centre['lng']},13z",start=20))
+                except ProviderError as exc:warning='Wider results unavailable: '+str(exc)
+            return kind,sorted(found,key=lambda p:p['area_distance_km'])[:20],warning
+        batches=await asyncio.gather(*(category(t) for t in types))
+        items={};report=[];successful=0
+        for kind,found,error in batches:
+            if not error or found:successful+=1
+            for item in found:
+                if item['id'] in items:
+                    old=items[item['id']];old['discovery_types']=list(dict.fromkeys(old['discovery_types']+[kind]))
+                else:items[item['id']]=item
+            count=len(found)
+            report.append({'type':kind,'count':count,'target':10,'request_failed':bool(error),'status':'unavailable' if error and not found else 'ready' if count>=10 else 'limited',
+                           'reason':error or (f'{count} matching map results within {radius:g} km; more may exist.' if count<10 else None)})
+        if not successful:raise ProviderError(next((reason for _,_,reason in batches if reason),'Accommodation search is unavailable.'))
+        failures=[error for _,_,error in batches if error]
+        return centre,sorted(items.values(),key=lambda p:p['area_distance_km']),[],{'policy':'nearest-v1','radius_km':radius,'target_per_type':10,'types':report,'unique_count':len(items),'complete':all(r['count']>=10 for r in report),'provider_incomplete':bool(failures),'limit_reached':any('limit' in e.lower() or 'credits' in e.lower() for e in failures)}
 
     async def photos(self,prop,body=None):
         if not prop.get('data_id'):return {'images':prop.get('images',[])}
@@ -180,10 +222,11 @@ class SerpApi:
         return {'images':images or prop.get('images',[])}
 
     async def reviews_only(self,prop,body=None):
-        if not (prop.get('place_id') or prop.get('data_id')):return {'reviews':[]}
+        if not (prop.get('place_id') or prop.get('data_id')):return {'reviews':[],'review_safety':review_safety([])}
         params={'place_id':prop['place_id']} if prop.get('place_id') else {'data_id':prop['data_id']}
         payload=await self.search('google_maps_reviews',**params,sort_by='newestFirst',ttl=86400)
-        return {'reviews':[{'text':str(r.get('snippet') or r.get('text') or '')[:260],'rating':finite(r.get('rating')),'date':r.get('iso_date') or r.get('date'),'url':safe_url(r.get('link')) or prop['source_url']} for r in payload.get('reviews',[])[:10]]}
+        reviews=[{'text':str(r.get('snippet') or r.get('text') or '')[:1800],'rating':finite(r.get('rating')),'date':r.get('iso_date') or r.get('date'),'url':safe_url(r.get('link')) or prop.get('source_url')} for r in payload.get('reviews',[])[:20] if isinstance(r,dict)]
+        return {'reviews':reviews,'review_safety':review_safety(reviews),'retrieved_at':stamp()}
 
     async def place_only(self,prop,body=None):
         if not (prop.get('place_id') or prop.get('data_id')):return {'property_facts':{}}
@@ -266,10 +309,19 @@ class SerpApi:
         return {'places':sorted(found,key=lambda x:x['distance_km'])[:12],'warnings':[],'retrieved_at':stamp()}
 
     async def area_evidence(self,prop,body):
+        area=body.location.name if body.location else body.area
+        address=body.location.address if body.location else ('' if body.city=='Worldwide' else body.city)
+        query=f'"{area}" {address} safety crime women harassment'
         results=[]
         try:
-            p=await self.search('google',q=f'{prop["area"]} {prop["city"]} local safety advisories crime news',gl='in',num=5,ttl=3600)
-            for r in p.get('organic_results',[])[:5]:
-                if u:=safe_url(r.get('link')):results.append({'title':r.get('title','Source'),'snippet':r.get('snippet',''),'date':r.get('date'),'url':u,'status':'Search result — relevance and claims need checking'})
-        except ProviderError:return {'sources':[],'warning':'Local report search is unavailable. No safety conclusion can be drawn.'}
-        return {'sources':results,'summary':'Search results are leads to inspect, not a verified local crime database or a safety verdict.','retrieved_at':stamp()}
+            p=await self.search('google_news',q=query,ttl=21600)
+            for group in p.get('news_results',[]):
+                if not isinstance(group,dict):continue
+                for row in [group]+([group['highlight']] if isinstance(group.get('highlight'),dict) else [])+(group.get('stories') or []):
+                    if not isinstance(row,dict):continue
+                    if u:=safe_url(row.get('link')):
+                        source=row.get('source') or {}
+                        results.append({'title':row.get('title','Source'),'snippet':str(row.get('snippet') or '')[:500],'date':row.get('iso_date') or row.get('date'),'publisher':source.get('name') if isinstance(source,dict) else str(source),'url':u,'status':'News lead; check location, date and claims at the source.'})
+            results=list({r['url']:r for r in results}.values())[:8]
+        except ProviderError as exc:return {'sources':[],'warning':str(exc),'summary':'News unavailable; no safety conclusion can be drawn.'}
+        return {'sources':results,'summary':'News search results are context to verify, not a local crime database. No reports found does not mean an area is safe.','retrieved_at':stamp()}

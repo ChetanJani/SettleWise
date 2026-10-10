@@ -76,6 +76,6 @@ def rank(properties,prefs):
     elif prefs.sort=='price':output.sort(key=lambda p:(p.get('price') is None,p.get('price_unit','month'),p.get('price') or 0,p['id']))
     elif prefs.sort=='rating':output.sort(key=lambda p:(p.get('rating') is None,-(p.get('rating') or 0),p['id']))
     elif prefs.sort=='commute':output.sort(key=lambda p:((p.get('commute') or {}).get('morning',{}).get('minutes') is None,(p.get('commute') or {}).get('morning',{}).get('minutes') or 0,p['id']))
-    else:output.sort(key=lambda p:(p.get('alternative',False),p.get('match_score') is None,-(p.get('match_score') or 0),p.get('area_distance_km',0),p['id']))
+    else:output.sort(key=lambda p:(p.get('alternative',False),p.get('match_score') is None,-(p.get('match_score') or 0),(p.get('price') or 0) if prefs.priority=='cost' else 0,p.get('area_distance_km',0),p['id']))
     best=next((p['id'] for p in output if p.get('match_score') is not None and not p['alternative']),None)
     return {'properties':output,'unconfirmed':unknown,'excluded_count':excluded,'best_id':best,'personalised':personalised,'scoring_note':'Preference fit is a rules-based comparison, not a safety rating or a probability. Unknown requirements are never assumed satisfied.'}

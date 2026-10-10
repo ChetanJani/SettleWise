@@ -357,3 +357,39 @@ Later: multilingual interface, saved-location alerts and relocation checklists.
 
 This brief describes the agreed product direction and its honest constraints.
 README.md explains setup and implementation. PRD.md lists product requirements.
+
+21. LATEST SEARCH AND POPUP BEHAVIOUR — 10 OCTOBER 2026
+-----------------------------------------------------
+All five categories are collected even when only PG is selected. Target: 10
+per category within 3 km, using five parallel Maps queries and at most one
+extra page per sparse category. Real shortfalls are shown, never filled with
+fictional listings. Shared PG/hostel places appear once in All types.
+Filters and type switching use the cached dataset, with no provider searches.
+Details appear in a popup. A small Local experiences button opens a separate
+popup for unverified neighbourhood observations and contributions.
+Review safety sentiment is shown only after three classified safety reviews,
+with positive/negative/mixed counts. It is not a personal safety probability.
+Google News links show publisher/date as context and do not inflate the score.
+Selected controls use deep forest green #0D4D37 with white text.
+Frontend discovery is live-only; use intercepted mocks for development.
+
+22. NEAREST TEN COLLECTION UPDATE
+--------------------------------
+Search all five types within 10 km, nearest first. Reuse farther rows already
+returned, then expand sparse types using a broader map query and pagination.
+At most four provider requests per type; cache and quota limits still apply.
+Collection counts are hidden from the UI. Real source availability and stricter
+filters can produce fewer than ten; never invent properties to reach a quota.
+Safety score uses safety-related review sentiment. A general rating remains a
+separate Review score fallback. Reasons/sample details appear only in popups.
+
+23. HACKATHON EXAMPLE MODE
+--------------------------
+The Try demo button opens 50 fictional stays: ten PGs, hostels, hotels, flats
+and houses. Filters reset so every category is immediately visible. Each stay
+has a price, three stock photo scenes, capacity, eligibility or BHK, amenities,
+security features, synthetic reviews and simulated there/back travel estimates.
+Nearby services and community popups are populated. Example posts/votes stay
+on the device and never enter the real community database. No SerpApi credits
+are consumed. Demo labels stay visible; Live search exits the example.
+HACKATHON-DEMO.md gives the pitch sequence and technical constraints.

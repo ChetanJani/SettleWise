@@ -13,7 +13,7 @@ export function rankLocal(candidates,f){
   const personalised=!!(f.budget||f.hotel_budget||f.gender_requirement!=='any'||f.occupants>1||f.bedrooms!=null||f.amenities.length||f.max_commute||f.priority!=='balanced');
   for(const raw of candidates){
     const p={...raw},missing=[],reasons=[],tradeoffs=[];let fails=false;
-    if(!f.property_types.includes(p.type)&&p.type!=='other'){excluded++;continue}
+    if(!f.property_types.includes(p.type)&&p.type!=='other'){const match=p.discovery_types?.find(t=>f.property_types.includes(t));if(!match){excluded++;continue}p.original_type=p.type;p.type=match}
     if(p.type==='other'&&f.property_types.length!==5)missing.push('Type unknown');
     if(f.photos_only&&!p.images?.length){excluded++;continue}
     if(f.radius_km&&(p.area_distance_km==null||p.area_distance_km>f.radius_km)){excluded++;continue}
@@ -44,7 +44,7 @@ export function rankLocal(candidates,f){
     p.monthly_cost=p.price!=null&&p.price_unit!=='night'?{total_known:p.price+(p.maintenance||0)}:null;
     (missing.length?unknown:known).push(p);
   }
-  const sorts={price:(a,b)=>Number(a.price==null)-Number(b.price==null)||(a.price_unit||'month').localeCompare(b.price_unit||'month')||(a.price||0)-(b.price||0),rating:(a,b)=>Number(a.rating==null)-Number(b.rating==null)||(b.rating||0)-(a.rating||0),distance:(a,b)=>Number(a.area_distance_km==null)-Number(b.area_distance_km==null)||(a.area_distance_km||0)-(b.area_distance_km||0),safety:(a,b)=>Number(a.safety_evidence.score==null)-Number(b.safety_evidence.score==null)||(b.safety_evidence.score||0)-(a.safety_evidence.score||0),commute:(a,b)=>Number(a.commute?.morning?.minutes==null)-Number(b.commute?.morning?.minutes==null)||(a.commute?.morning?.minutes||0)-(b.commute?.morning?.minutes||0)};
+  const sorts={price:(a,b)=>Number(a.price==null)-Number(b.price==null)||(a.price_unit||'month').localeCompare(b.price_unit||'month')||(a.price||0)-(b.price||0),rating:(a,b)=>Number(a.rating==null)-Number(b.rating==null)||(b.rating||0)-(a.rating||0),distance:(a,b)=>Number(a.area_distance_km==null)-Number(b.area_distance_km==null)||(a.area_distance_km||0)-(b.area_distance_km||0),safety:(a,b)=>Number(a.review_safety?.score==null)-Number(b.review_safety?.score==null)||(b.review_safety?.score||0)-(a.review_safety?.score||0)||(b.safety_evidence.score||0)-(a.safety_evidence.score||0),commute:(a,b)=>Number(a.commute?.morning?.minutes==null)-Number(b.commute?.morning?.minutes==null)||(a.commute?.morning?.minutes||0)-(b.commute?.morning?.minutes||0)};
   const compare=sorts[f.sort]||((a,b)=>Number(a.alternative)-Number(b.alternative)||Number(a.match_score==null)-Number(b.match_score==null)||(b.match_score||0)-(a.match_score||0)||(a.area_distance_km??Infinity)-(b.area_distance_km??Infinity));
   known.sort(compare);unknown.sort(compare);
   return {properties:known,unconfirmed:unknown,excluded_count:excluded,best_id:known.find(p=>p.match_score!=null&&!p.alternative)?.id,personalised};

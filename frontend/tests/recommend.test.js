@@ -31,3 +31,13 @@ test('type, radius, photos and known-only use collected data',()=>{
  assert.equal(rankLocal(items,{...defaults,property_types:['pg'],photos_only:true,radius_km:2}).properties.length,1);
  assert.equal(rankLocal(items,{...defaults,budget:10000,hotel_budget:1000,known_only:true}).properties.length,0);
 });
+test('a shared PG and hostel source can be filtered under either collected category',()=>{
+ const items=[place('shared',{discovery_types:['pg','hostel']}),place('hotel',{type:'hotel'})];
+ const hostels=rankLocal(items,{...defaults,property_types:['hostel']}).properties;
+ assert.equal(hostels.length,1);assert.equal(hostels[0].type,'hostel');assert.equal(hostels[0].original_type,'pg');
+ assert.equal(rankLocal(items,defaults).properties.length,2);
+});
+test('review safety sort prioritises scored reviews and keeps unknown evidence separate',()=>{
+ const items=[place('unknown',{rating:5,security_facts:{cctv:true,guard:true,lighting:true,access_control:true}}),place('low',{review_safety:{score:33}}),place('high',{review_safety:{score:75}})];
+ assert.deepEqual(rankLocal(items,{...defaults,sort:'safety'}).properties.map(p=>p.id),['high','low','unknown']);
+});

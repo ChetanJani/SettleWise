@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: settlewisehca-api
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: CORS_ORIGINS
+        value: https://settlewisehca.netlify.app
+      - key: SERPAPI_DAILY_LIMIT
+        value: "100"
+      - key: SERPAPI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false

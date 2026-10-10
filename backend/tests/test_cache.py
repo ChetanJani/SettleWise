@@ -28,12 +28,15 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
         provider=SerpApi('unused');calls=[]
         async def search(engine,**params):calls.append((engine,params));return {'suggestions':[]}
         provider.search=search;await provider.autocomplete('nav','Worldwide');self.assertEqual(len(calls),1);await provider.close()
-    async def test_multi_type_discovery_is_one_request_at_selected_point(self):
+    async def test_discovery_collects_all_five_types_at_selected_point(self):
         provider=SerpApi('unused');calls=[]
         async def search(engine,**params):calls.append((engine,params));return {'local_results':[]}
         provider.search=search
         await provider.discover(SearchRequest(area='Office',city='Pune',location={'name':'Office','lat':18.56,'lng':73.91},property_types=['pg','hotel','flat']))
-        self.assertEqual(len(calls),1);await provider.close()
+        self.assertEqual(len(calls),10)
+        self.assertEqual(sum(params['ll'].endswith('15z') for _,params in calls),5)
+        self.assertEqual(sum(params['ll'].endswith('13z') for _,params in calls),5)
+        await provider.close()
 
 class EvidenceTests(unittest.TestCase):
     def test_rating_does_not_become_safety(self):self.assertIsNone(evidence({'rating':5,'review_count':1000})['score'])

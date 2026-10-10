@@ -10,4 +10,5 @@ dist/
 *.log
 *.sqlite3
 .local/
+.netlify/
 work/
